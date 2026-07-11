@@ -1,0 +1,236 @@
+# PropLab
+
+**Work in progress.** PropLab is an early-stage, Storybook-like lab for React components: it scans your project, builds a catalog from exports, generates props from TypeScript types, and previews components live — without requiring story files.
+
+> Expect rough edges. APIs, UI, and framework support will change. **React Native / Expo preview is experimental and not fully supported yet.**
+
+```bash
+npx proplab
+```
+
+Opens the lab at [http://localhost:4591](http://localhost:4591).
+
+---
+
+## Status
+
+| Area | State |
+|------|--------|
+| React (Vite / CRA-style) | Usable for exploration |
+| Next.js (App Router) | Partial — shims + stubs, not a full Next runtime |
+| Tailwind / PostCSS | Works when project configs are present |
+| Compound / context components | Best-effort auto-wrapping (Radix-style) |
+| React Native / Expo | **Catalog works; live preview is incomplete** |
+| Config / providers / stories | Planned (e.g. `.proplabrc`) |
+
+This is a **v0.1** experiment. Use it to explore component APIs and fixtures — not as a production design-system docs host yet.
+
+---
+
+## Why PropLab?
+
+Storybook is powerful, but writing and maintaining stories for every component adds friction. PropLab flips the workflow:
+
+1. **Discover** — AST scan finds exported React components  
+2. **Extract** — prop types become an editable schema  
+3. **Generate** — dummy fixtures and variants from enums, booleans, objects, arrays  
+4. **Preview** — Vite-powered live render with a props panel  
+
+---
+
+## Getting started
+
+### Prerequisites
+
+- **Node.js 18+**
+- A React project with dependencies installed (`npm install` / `pnpm install` / etc.)
+- PropLab resolves packages from the **target project’s** `node_modules`, not its own
+
+### Run against your project
+
+```bash
+# From the root of any React app
+npx proplab
+
+# Or point at a path
+npx proplab --project ./apps/web
+
+# Scan only (no UI) — useful for CI / debugging discovery
+npx proplab --scan-only
+```
+
+Then open [http://localhost:4591](http://localhost:4591).
+
+### CLI options
+
+```
+Usage: proplab [options]
+
+Options:
+  -p, --project <path>   Project root (default: cwd)
+  --port <number>        Server port (default: 4591)
+  --no-open              Do not open the browser
+  --no-watch             Disable filesystem watching
+  --scan-only            Print catalog stats and exit
+```
+
+---
+
+## Try the bundled demo
+
+The repo ships a small React kit under [`examples/demo-ui`](examples/demo-ui) so you can evaluate PropLab without wiring your own app.
+
+**What’s in the demo**
+
+| Component | Good for exercising… |
+|-----------|----------------------|
+| `Button`, `Badge`, `Card` | Enums, booleans, simple variants |
+| `DataTable` | Column/row arrays, selection, density |
+| `PricingCard` | Nested feature lists, billing cycle, CTA |
+| `AlertBanner` | Severity, action objects, dismiss |
+| `Toast` | Position, duration, progress, action chip |
+| `ProfileCard` | Nested `user` object, stats, status/role |
+
+### Run the demo (from this repo)
+
+```bash
+git clone https://github.com/phemymii/PropLab.git
+cd PropLab
+npm install
+npm run demo
+```
+
+Then open [http://localhost:4591](http://localhost:4591).
+
+`npm run demo` builds all packages and starts PropLab against `examples/demo-ui` (browser open is disabled by default; use the URL above).
+
+Equivalent manual command:
+
+```bash
+npm run build
+node packages/cli/dist/index.js --project examples/demo-ui
+```
+
+---
+
+## Features (current)
+
+- Component catalog with search and folder grouping  
+- Prop schema from TypeScript interfaces / component parameter types  
+- Auto fixtures for string, number, boolean, enums, objects, arrays  
+- Named variants derived from enum + boolean props  
+- Live preview iframe via Vite middleware  
+- Props controls + live JSON  
+- Filesystem watch + WebSocket catalog refresh  
+- Light / dark lab UI  
+- Path alias resolution from `tsconfig` / `jsconfig` (including `extends`)  
+- Best-effort wrapping for compound components that need parent context  
+
+---
+
+## How it works
+
+```
+Your project
+     │
+     ▼
+@proplab/core      Discovery (ts-morph) → prop schema → fixtures / variants
+     │
+     ▼
+@proplab/server    Fastify API + Vite preview middleware + file watch
+     │
+     ▼
+@proplab/web       Catalog · preview · props panel
+```
+
+The preview loads your real module via Vite (`/@fs/...`), then syncs prop edits from the lab UI with `postMessage`.
+
+| Package | Role |
+|---------|------|
+| `@proplab/core` | Scanner, prop schema, fixtures |
+| `@proplab/server` | API, Vite preview, static UI |
+| `@proplab/web` | Lab interface |
+| `proplab` | CLI |
+
+---
+
+## Framework notes
+
+### React (web)
+
+Best supported path today: standard React + TypeScript projects with local `node_modules`. Vite/Next-style path aliases and Tailwind/PostCSS are picked up when present.
+
+### Next.js
+
+Partial support only:
+
+- Common `next/*` imports are **shimmed** for the browser preview (`link`, `image`, `navigation`, themes, …)  
+- `'use server'` modules are stubbed  
+- App Router `page.tsx` / `layout.tsx` are excluded from the catalog by default  
+- This is **not** a full Next.js runtime — server components, RSC data fetching, and many App Router behaviors won’t work as in production  
+
+### React Native / Expo — incomplete
+
+PropLab can **discover and list** RN/Expo components and generate prop fixtures.
+
+**Live preview is not fully supported yet.** When `react-native-web` is available in the project, some components may render in the web iframe; many will not.
+
+Expect gaps around:
+
+- Native modules (camera, bluetooth, sensors, …)  
+- Platform-specific APIs and native navigation  
+- Expo modules that have no web implementation  
+- Gesture / reanimated / native-only UI  
+
+Those components still appear in the catalog with editable props; the preview may show an error until a dedicated native (or better RN-web) path exists.
+
+```bash
+# Catalog + experimental preview — results vary by component
+npx proplab --project ./apps/mobile
+```
+
+---
+
+## Limitations
+
+- Early software — bugs, incomplete edge cases, and breaking changes are expected  
+- Components that need custom providers (forms, themes, routers) may fail until configurable wrappers land  
+- Node-only packages (`sharp`, `nodemailer`, `fs`, …) are stubbed in preview  
+- Generated fixtures are heuristics — nested/index-signature types can look thin  
+- Global CSS is auto-injected when common entry files are found (`app/globals.css`, etc.)  
+- Not a replacement for visual regression, a11y audits, or full Storybook workflows yet  
+
+---
+
+## Local development
+
+```bash
+git clone https://github.com/phemymii/PropLab.git
+cd PropLab
+npm install
+npm run build
+
+# Demo kit (recommended first run)
+npm run demo
+
+# Or your own project
+npm run proplab -- --project /path/to/your-app
+
+# Lab UI only (Vite), proxies API to :4591 when the server is running
+npm run dev
+```
+
+---
+
+## Contributing / feedback
+
+Issues and PRs are welcome — especially reproductions against real apps (Next, Expo, monorepos).
+
+- Repo: [github.com/phemymii/PropLab](https://github.com/phemymii/PropLab)  
+- Bugs: [Issues](https://github.com/phemymii/PropLab/issues)  
+
+---
+
+## License
+
+MIT

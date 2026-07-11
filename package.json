@@ -1,0 +1,28 @@
+{
+  "name": "proplab-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zero-config component lab — discover components, generate props, preview live",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phemymii/PropLab.git"
+  },
+  "homepage": "https://github.com/phemymii/PropLab#readme",
+  "bugs": {
+    "url": "https://github.com/phemymii/PropLab/issues"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @proplab/core && npm run build -w @proplab/web && npm run build -w @proplab/server && npm run build -w proplab",
+    "dev": "npm run dev -w @proplab/web",
+    "proplab": "node packages/cli/dist/index.js",
+    "start": "npm run build && node packages/cli/dist/index.js",
+    "demo": "npm run build && node packages/cli/dist/index.js --project examples/demo-ui --no-open"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,249 @@
+import path from 'node:path';
+import { Project, Node, type SourceFile } from 'ts-morph';
+import { discoverProject, listSourceFiles } from './discovery.js';
+import { extractPropSchema } from './props.js';
+import { generateFixtures, generateVariants } from './fixtures.js';
+import { shouldSkipCatalogFile } from './preview-assets.js';
+import type {
+  ComponentInfo,
+  LabCatalog,
+  ProgressCallback,
+  ScanOptions,
+} from './types.js';
+
+export async function scanProject(
+  options: ScanOptions,
+  onProgress?: ProgressCallback,
+): Promise<LabCatalog> {
+  const started = Date.now();
+  onProgress?.({ phase: 'discover', message: 'Discovering project…' });
+
+  const config = discoverProject(options.root);
+  const files = listSourceFiles(config.root).filter((f) => {
+    const rel = path.relative(config.root, f);
+    if (options.exclude?.some((p) => rel.includes(p))) return false;
+    if (options.include?.length) {
+      return options.include.some((p) => rel.includes(p));
+    }
+    if (shouldSkipCatalogFile(rel, config.type)) return false;
+    return true;
+  });
+
+  onProgress?.({
+    phase: 'parse',
+    message: `Parsing ${files.length} files…`,
+    current: 0,
+    total: files.length,
+  });
+
+  const project = new Project({
+    skipAddingFilesFromTsConfig: true,
+    compilerOptions: {
+      allowJs: true,
+      jsx: 4,
+      target: 99,
+      module: 99,
+      esModuleInterop: true,
+      strict: false,
+      skipLibCheck: true,
+    },
+  });
+
+  const components: ComponentInfo[] = [];
+  let parsed = 0;
+
+  for (const filePath of files) {
+    parsed += 1;
+    if (parsed % 25 === 0 || parsed === files.length) {
+      onProgress?.({
+        phase: 'parse',
+        message: `Parsing ${parsed}/${files.length}…`,
+        current: parsed,
+        total: files.length,
+      });
+    }
+
+    let sourceFile: SourceFile;
+    try {
+      sourceFile = project.addSourceFileAtPath(filePath);
+    } catch {
+      continue;
+    }
+
+    const found = extractComponentsFromFile(sourceFile, filePath, config.root, project);
+    components.push(...found);
+  }
+
+  onProgress?.({
+    phase: 'fixtures',
+    message: `Generating fixtures for ${components.length} components…`,
+  });
+
+  for (const comp of components) {
+    comp.fixtures = generateFixtures(comp.props, comp.name);
+    comp.variants = generateVariants(comp.props, comp.fixtures);
+  }
+
+  components.sort((a, b) => a.name.localeCompare(b.name) || a.relativePath.localeCompare(b.relativePath));
+
+  onProgress?.({ phase: 'done', message: 'Scan complete' });
+
+  return {
+    config,
+    components,
+    stats: {
+      totalFiles: files.length,
+      totalComponents: components.length,
+      withProps: components.filter((c) => c.props.fields.length > 0).length,
+      scanDurationMs: Date.now() - started,
+    },
+    scannedAt: new Date().toISOString(),
+  };
+}
+
+function extractComponentsFromFile(
+  sourceFile: SourceFile,
+  filePath: string,
+  root: string,
+  project: Project,
+): ComponentInfo[] {
+  const relativePath = path.relative(root, filePath);
+  const results: ComponentInfo[] = [];
+  const seen = new Set<string>();
+
+  const push = (
+    name: string,
+    exportName: string,
+    isDefaultExport: boolean,
+    line: number,
+  ) => {
+    const id = `${relativePath}::${exportName}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    const props = extractPropSchema(
+      sourceFile,
+      isDefaultExport ? name : exportName,
+      isDefaultExport,
+      project,
+    );
+    results.push({
+      id,
+      name,
+      exportName,
+      filePath,
+      relativePath,
+      isDefaultExport,
+      props,
+      fixtures: {},
+      variants: [],
+      line,
+    });
+  };
+
+  // Named function exports
+  for (const fn of sourceFile.getFunctions()) {
+    if (!fn.isExported()) continue;
+    const name = fn.getName();
+    if (!name || !isComponentName(name)) continue;
+    push(name, name, false, fn.getStartLineNumber());
+  }
+
+  // Variable exports (const Button = ...)
+  for (const stmt of sourceFile.getVariableStatements()) {
+    if (!stmt.isExported()) continue;
+    for (const decl of stmt.getDeclarations()) {
+      const name = decl.getName();
+      if (!isComponentName(name)) continue;
+      if (!looksLikeComponent(decl)) continue;
+      push(name, name, false, decl.getStartLineNumber());
+    }
+  }
+
+  // export { Foo }
+  for (const exp of sourceFile.getExportDeclarations()) {
+    for (const spec of exp.getNamedExports()) {
+      const name = spec.getName();
+      if (!isComponentName(name)) continue;
+      const local = sourceFile.getVariableDeclaration(name) ?? sourceFile.getFunction(name);
+      if (!local) continue;
+      if (Node.isVariableDeclaration(local) && !looksLikeComponent(local)) continue;
+      push(name, name, false, local.getStartLineNumber());
+    }
+  }
+
+  // Default export
+  const defaultSymbol = sourceFile.getDefaultExportSymbol();
+  if (defaultSymbol) {
+    const name = inferDefaultName(defaultSymbol.getName(), filePath);
+    const display = isComponentName(name)
+      ? name
+      : path.basename(filePath, path.extname(filePath));
+    if (isComponentName(display)) {
+      // Skip if we already catalogued the same component as a named export
+      const alreadyNamed = results.some(
+        (c) => c.name === display || c.exportName === display,
+      );
+      if (!alreadyNamed) {
+        const line = defaultSymbol.getDeclarations()?.[0]?.getStartLineNumber() ?? 1;
+        push(display, 'default', true, line);
+      }
+    }
+  }
+
+  return results;
+}
+
+function isComponentName(name: string): boolean {
+  return /^[A-Z][A-Za-z0-9]*$/.test(name);
+}
+
+function looksLikeComponent(decl: import('ts-morph').VariableDeclaration): boolean {
+  const init = decl.getInitializer();
+  if (!init) {
+    // typed as FC / ComponentType
+    const typeText = decl.getType().getText();
+    return /FC|FunctionComponent|ComponentType|ForwardRef|MemoExotic/.test(typeText);
+  }
+
+  if (Node.isArrowFunction(init) || Node.isFunctionExpression(init)) {
+    // Heuristic: returns JSX or has PascalCase name (already checked)
+    const body = init.getBody();
+    if (!body) return true;
+    const text = body.getText();
+    return /return\s*\(?\s*</.test(text) || /=>\s*</.test(init.getText()) || text.includes('jsx') || text.includes('<');
+  }
+
+  if (Node.isCallExpression(init)) {
+    const expr = init.getExpression();
+    const callee = Node.isIdentifier(expr)
+      ? expr.getText()
+      : Node.isPropertyAccessExpression(expr)
+        ? expr.getName()
+        : '';
+    return callee === 'memo' || callee === 'forwardRef' || callee === 'styled';
+  }
+
+  return false;
+}
+
+function inferDefaultName(symbolName: string, filePath: string): string {
+  if (symbolName && symbolName !== 'default') return symbolName;
+  return path.basename(filePath, path.extname(filePath));
+}
+
+export function getComponentById(catalog: LabCatalog, id: string): ComponentInfo | undefined {
+  return catalog.components.find((c) => c.id === id || encodeURIComponent(c.id) === id);
+}
+
+export function searchComponents(catalog: LabCatalog, query: string): ComponentInfo[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return catalog.components.slice(0, 50);
+  return catalog.components
+    .filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.relativePath.toLowerCase().includes(q) ||
+        c.exportName.toLowerCase().includes(q),
+    )
+    .slice(0, 50);
+}
