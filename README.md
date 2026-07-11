@@ -10,6 +10,10 @@ npx proplab
 
 Opens the lab at [http://localhost:4591](http://localhost:4591).
 
+### Tutorial
+
+![PropLab tutorial — browse components, edit props, and preview live](assets/tutorial.gif)
+
 ---
 
 ## Status
