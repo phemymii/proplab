@@ -1,6 +1,6 @@
 {
   "name": "@proplab/web",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@proplab/core": "0.1.0",
+    "@proplab/core": "0.1.1",
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.469.0",
     "react": "^18.3.1",
@@ -25,7 +25,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phemymii/PropLab.git",
+    "url": "git+https://github.com/phemymii/proplab.git",
     "directory": "packages/web"
+  },
+  "homepage": "https://github.com/phemymii/proplab#readme",
+  "bugs": {
+    "url": "https://github.com/phemymii/proplab/issues"
   }
 }

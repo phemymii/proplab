@@ -1,6 +1,6 @@
 {
   "name": "proplab",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Zero-config component lab — discover components, generate props, preview live",
   "type": "module",
   "bin": {
@@ -8,7 +8,10 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
@@ -21,21 +24,23 @@
     "props",
     "preview",
     "developer-tools",
-    "proplab"
+    "proplab",
+    "component-lab"
   ],
+  "author": "phemymii",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phemymii/PropLab.git",
+    "url": "git+https://github.com/phemymii/proplab.git",
     "directory": "packages/cli"
   },
-  "homepage": "https://github.com/phemymii/PropLab#readme",
+  "homepage": "https://github.com/phemymii/proplab#readme",
   "bugs": {
-    "url": "https://github.com/phemymii/PropLab/issues"
+    "url": "https://github.com/phemymii/proplab/issues"
   },
   "dependencies": {
-    "@proplab/core": "0.1.0",
-    "@proplab/server": "0.1.0",
+    "@proplab/core": "0.1.1",
+    "@proplab/server": "0.1.1",
     "chalk": "^5.4.1",
     "commander": "^12.1.0",
     "ora": "^8.1.1"

@@ -1,6 +1,6 @@
 {
   "name": "@proplab/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Component discovery, prop extraction, and fixture generation for PropLab",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,11 +11,25 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "react",
+    "components",
+    "props",
+    "typescript",
+    "proplab"
+  ],
+  "author": "phemymii",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "fast-glob": "^3.3.3",
@@ -27,11 +41,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phemymii/PropLab.git",
+    "url": "git+https://github.com/phemymii/proplab.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/phemymii/PropLab#readme",
+  "homepage": "https://github.com/phemymii/proplab#readme",
   "bugs": {
-    "url": "https://github.com/phemymii/PropLab/issues"
+    "url": "https://github.com/phemymii/proplab/issues"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
