@@ -34,6 +34,7 @@ export function useCatalogData() {
         };
         if (msg.type === 'scanning') setScanning(true);
         if (msg.type === 'catalog-update' && msg.data) setCatalog(msg.data);
+        if (msg.type === 'config-update') useExplorerStore.getState().bumpPreview();
       } catch {
         // ignore malformed
       }

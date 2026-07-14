@@ -74,6 +74,8 @@ export interface ProjectConfig {
   aliases: Record<string, string>;
   hasReact: boolean;
   hasReactNative: boolean;
+  /** Relative path to `.proplabrc` / `proplab.config.*` when present */
+  proplabConfig: string | null;
 }
 
 export interface LabCatalog {
@@ -90,6 +92,7 @@ export interface LabCatalog {
 
 export interface ScanOptions {
   root: string;
+  /** Relative paths (dirs or files) to scan instead of default roots */
   include?: string[];
   exclude?: string[];
 }

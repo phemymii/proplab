@@ -16,6 +16,8 @@ import {
   searchComponents,
   discoverProject,
   discoverPreviewStyles,
+  findPropLabConfig,
+  PROPLAB_CONFIG_NAMES,
   type LabCatalog,
 } from '@proplab/core';
 import { previewHtml, proplabPreviewPlugin } from './preview-plugin.js';
@@ -29,6 +31,9 @@ export interface ServerOptions {
   openBrowser?: boolean;
   watch?: boolean;
   webDistPath?: string;
+  /** Limit scan to these project-relative paths */
+  include?: string[];
+  onProgress?: (progress: { message: string; phase?: string }) => void;
 }
 
 export interface ServerInstance {
@@ -47,6 +52,8 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
     openBrowser = true,
     watch = true,
     webDistPath,
+    include,
+    onProgress,
   } = options;
 
   const app = Fastify({ logger: false });
@@ -58,17 +65,23 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   await app.register(middie);
 
   async function doScan(): Promise<LabCatalog> {
-    catalog = await scanProject({ root: projectRoot });
+    catalog = await scanProject({ root: projectRoot, include }, (progress) => {
+      onProgress?.(progress);
+    });
     return catalog;
   }
 
   const projectConfig = discoverProject(projectRoot);
   assertProjectDependencies(projectRoot);
   const styleUrls = discoverPreviewStyles(projectRoot, projectConfig.type);
+  let propLabConfig = findPropLabConfig(projectRoot);
 
   const plugins: PluginOption[] = [
     react(),
-    proplabPreviewPlugin((id) => (catalog ? getComponentById(catalog, id) : undefined)),
+    proplabPreviewPlugin(
+      (id) => (catalog ? getComponentById(catalog, id) : undefined),
+      () => findPropLabConfig(projectRoot)?.path ?? null,
+    ),
   ];
 
   if (projectConfig.type === 'nextjs') {
@@ -130,6 +143,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
     type: catalog?.config.type ?? projectConfig.type,
     aliases: projectConfig.aliases,
     styles: styleUrls,
+    proplabConfig: propLabConfig?.relativePath ?? catalog?.config.proplabConfig ?? null,
   }));
 
   app.get('/api/catalog', async () => {
@@ -192,13 +206,17 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
       .map((dir) => path.join(projectRoot, dir))
       .filter((dir) => fs.existsSync(dir));
     const targets = watchRoots.length > 0 ? watchRoots : [projectRoot];
+    for (const name of PROPLAB_CONFIG_NAMES) {
+      targets.push(path.join(projectRoot, name));
+    }
 
     watcher = chokidar.watch(targets, {
       ignored: (p) =>
         /(node_modules|\.git|dist|build|\.expo|android|ios|\.next|coverage|\.cache)/.test(p) ||
         (fs.existsSync(p) &&
           fs.statSync(p).isFile() &&
-          !/\.(tsx?|jsx?|css|scss|sass|less)$/.test(p)),
+          !/\.(tsx?|jsx?|css|scss|sass|less)$/.test(p) &&
+          !/(^|[\\/])(\.proplabrc|proplab\.config)\.(tsx?|jsx?)$/.test(p)),
       persistent: true,
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 250, pollInterval: 50 },
@@ -211,18 +229,34 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
     });
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const handleChange = () => {
+    const handleChange = (changedPath?: string) => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
+        const isConfigChange =
+          typeof changedPath === 'string' &&
+          /(^|[\\/])(\.proplabrc|proplab\.config)\.(tsx?|jsx?)$/.test(changedPath);
+
+        propLabConfig = findPropLabConfig(projectRoot);
+
+        if (isConfigChange) {
+          // Force preview iframe remount so decorators reload
+          try {
+            await vite.moduleGraph.invalidateAll();
+          } catch {
+            // ignore
+          }
+          broadcast({ type: 'config-update', data: { proplabConfig: propLabConfig?.relativePath ?? null } });
+        }
+
         broadcast({ type: 'scanning' });
         const result = await doScan();
         broadcast({ type: 'catalog-update', data: result });
       }, 500);
     };
 
-    watcher.on('change', handleChange);
-    watcher.on('add', handleChange);
-    watcher.on('unlink', handleChange);
+    watcher.on('change', (p) => handleChange(p));
+    watcher.on('add', (p) => handleChange(p));
+    watcher.on('unlink', (p) => handleChange(p));
   }
 
   app.setNotFoundHandler(async (req, reply) => {
@@ -235,9 +269,14 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
     return reply.status(404).send({ error: 'Web UI not built. Run npm run build.' });
   });
 
-  await doScan();
   await app.listen({ port, host: '127.0.0.1' });
   const url = `http://localhost:${port}`;
+
+  // Scan after the server is up so the CLI / UI aren't blocked on large repos
+  onProgress?.({ phase: 'discover', message: 'Scanning components…' });
+  broadcast({ type: 'scanning' });
+  const firstCatalog = await doScan();
+  broadcast({ type: 'catalog-update', data: firstCatalog });
 
   if (openBrowser) {
     await open(url);

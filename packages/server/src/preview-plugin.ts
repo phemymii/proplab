@@ -1,9 +1,13 @@
+import path from 'node:path';
 import type { Plugin } from 'vite';
 import type { ComponentInfo } from '@proplab/core';
 
 const VIRTUAL_PREFIX = '\0proplab-preview:';
 
-export function proplabPreviewPlugin(getComponent: (id: string) => ComponentInfo | undefined): Plugin {
+export function proplabPreviewPlugin(
+  getComponent: (id: string) => ComponentInfo | undefined,
+  getConfigPath?: () => string | null,
+): Plugin {
   return {
     name: 'proplab-preview',
     enforce: 'pre',
@@ -32,13 +36,49 @@ export function proplabPreviewPlugin(getComponent: (id: string) => ComponentInfo
         ? 'Mod.default'
         : `Mod[${JSON.stringify(comp.exportName)}] ?? Mod.default`;
 
+      const configAbs = getConfigPath?.() ?? null;
+      const configImportPath = configAbs
+        ? `/@fs/${configAbs.split('\\').join('/')}`
+        : null;
+
+      const configImport = configImportPath
+        ? `import * as PropLabConfigMod from ${JSON.stringify(configImportPath)};`
+        : 'const PropLabConfigMod = null;';
+
       return `
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import * as Mod from ${JSON.stringify(importPath)};
+${configImport}
 
 const Component = ${exportExpr};
 const COMPONENT_NAME = ${JSON.stringify(comp.name)};
+
+function resolveDecorators(mod) {
+  if (!mod) return [];
+  const cfg = mod.default !== undefined ? mod.default : mod;
+  if (typeof cfg === 'function') return [cfg];
+  if (cfg && Array.isArray(cfg.decorators)) return cfg.decorators.filter((d) => typeof d === 'function');
+  if (Array.isArray(mod.decorators)) return mod.decorators.filter((d) => typeof d === 'function');
+  return [];
+}
+
+const decorators = resolveDecorators(PropLabConfigMod);
+
+/** Compose Storybook-style decorators around a preview tree (first = outermost). */
+function applyDecorators(tree) {
+  if (!decorators.length) return tree;
+  return decorators.reduceRight((child, decorator) => {
+    const Story = function PropLabStory() { return child; };
+    try {
+      const out = decorator(Story);
+      return out == null ? child : out;
+    } catch (err) {
+      console.error('[PropLab] decorator error', err);
+      return child;
+    }
+  }, tree);
+}
 
 // Props that make common compound roots (Radix etc.) render standalone
 const ROOT_DEFAULT_PROPS = {
@@ -216,7 +256,8 @@ if (!Component) {
       }
       tree = React.createElement(Mod[name], { key: 'w-' + name, ...(ROOT_DEFAULT_PROPS[name] || {}) }, ...children);
     }
-    return tree;
+    // Project .proplabrc decorators wrap the whole tree (providers, routers, …)
+    return applyDecorators(tree);
   }
 
   // Same-family exports that could be structural parents, closest root first:
@@ -279,7 +320,10 @@ if (!Component) {
       if (this.state.error) {
         if (this.retryScheduled) return null; // retry incoming
         const msg = (this.state.error.message || String(this.state.error));
-        const friendly = isContextError(this.state.error)
+        const missingProviders = isContextError(this.state.error) && decorators.length === 0;
+        const friendly = missingProviders
+          ? 'This component needs a provider/context. Add a .proplabrc.tsx with decorators (see examples/hard-cases), or wrap it in its parent compound component.\\n\\nOriginal error: ' + msg
+          : isContextError(this.state.error)
           ? 'This is a compound sub-component: it must be rendered inside its parent (e.g. MenuItem inside Menu). PropLab could not find or mount a matching parent in the same module.\\n\\nOriginal error: ' + msg
           : 'Preview error: ' + msg;
         return React.createElement('div', { style: { padding: 16 } },
@@ -319,7 +363,12 @@ if (!Component) {
     render();
   });
 
-  window.parent.postMessage({ type: 'proplab:ready', id: ${JSON.stringify(comp.id)} }, '*');
+  window.parent.postMessage({
+    type: 'proplab:ready',
+    id: ${JSON.stringify(comp.id)},
+    decorators: decorators.length,
+    config: ${JSON.stringify(configAbs ? path.basename(configAbs) : null)},
+  }, '*');
 }
 `;
     },

@@ -25,7 +25,7 @@ Opens the lab at [http://localhost:4591](http://localhost:4591).
 | Tailwind / PostCSS | Works when project configs are present |
 | Compound / context components | Best-effort auto-wrapping (Radix-style) |
 | React Native / Expo | **Catalog works; live preview is incomplete** |
-| Config / providers / stories | Planned (e.g. `.proplabrc`) |
+| Config / providers / stories | `.proplabrc` decorators supported — see [`examples/hard-cases`](examples/hard-cases) |
 
 This is a **v0.1** experiment. Use it to explore component APIs and fixtures — not as a production design-system docs host yet.
 
@@ -73,9 +73,17 @@ Usage: proplab [options]
 Options:
   -p, --project <path>   Project root (default: cwd)
   --port <number>        Server port (default: 4591)
+  -i, --include <paths>  Only scan these dirs/files (faster on large repos)
   --no-open              Do not open the browser
   --no-watch             Disable filesystem watching
   --scan-only            Print catalog stats and exit
+```
+
+On large monorepos, scope the scan:
+
+```bash
+npx proplab --include src/components
+npx proplab --include apps/web/src packages/ui/src
 ```
 
 ---
@@ -115,6 +123,14 @@ npm run build
 node packages/cli/dist/index.js --project examples/demo-ui
 ```
 
+### Hard cases (`.proplabrc` decorators)
+
+[`examples/hard-cases`](examples/hard-cases) has components that read Auth / Theme / Form context. A [`.proplabrc.tsx`](examples/hard-cases/.proplabrc.tsx) wraps every preview with `AppProviders`.
+
+```bash
+npm run demo:hard
+```
+
 ---
 
 ## Features (current)
@@ -129,6 +145,7 @@ node packages/cli/dist/index.js --project examples/demo-ui
 - Light / dark lab UI  
 - Path alias resolution from `tsconfig` / `jsconfig` (including `extends`)  
 - Best-effort wrapping for compound components that need parent context  
+- Project `.proplabrc` / `proplab.config.*` decorators (global providers)  
 
 ---
 
@@ -198,7 +215,8 @@ npx proplab --project ./apps/mobile
 ## Limitations
 
 - Early software — bugs, incomplete edge cases, and breaking changes are expected  
-- Components that need custom providers (forms, themes, routers) may fail until configurable wrappers land  
+- Large repos: PropLab prefers `src` / `app` / `pages` / `components` (and workspace packages) and skips non-UI files; use `--include` to narrow further  
+- Components that need custom providers (forms, themes, routers) — add a `.proplabrc` with decorators (see `examples/hard-cases`)  
 - Node-only packages (`sharp`, `nodemailer`, `fs`, …) are stubbed in preview  
 - Generated fixtures are heuristics — nested/index-signature types can look thin  
 - Global CSS is auto-injected when common entry files are found (`app/globals.css`, etc.)  

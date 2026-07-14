@@ -25,7 +25,7 @@ Opens the lab at [http://localhost:4591](http://localhost:4591).
 | Tailwind / PostCSS | Works when project configs are present |
 | Compound / context components | Best-effort auto-wrapping (Radix-style) |
 | React Native / Expo | **Catalog works; live preview is incomplete** |
-| Config / providers / stories | Planned (e.g. `.proplabrc`) |
+| Config / providers / stories | `.proplabrc` decorators supported — see `examples/hard-cases` |
 
 This is a **v0.1** experiment. Use it to explore component APIs and fixtures — not as a production design-system docs host yet.
 

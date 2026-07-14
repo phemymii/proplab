@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { findPropLabConfig } from './config.js';
 import type { ProjectConfig, ProjectType } from './types.js';
 
 const IGNORE_DIRS = new Set([
@@ -7,26 +8,52 @@ const IGNORE_DIRS = new Set([
   '.git',
   'dist',
   'build',
+  'out',
+  'public',
   '.expo',
   'android',
   'ios',
   'coverage',
   '.next',
+  '.vercel',
+  '.netlify',
   '__tests__',
   '__mocks__',
+  '__generated__',
   '.venv',
   '.idea',
   '.turbo',
   '.cache',
+  '.husky',
+  '.yarn',
   'vendor',
   'Pods',
   '.gradle',
   'DerivedData',
   'storybook-static',
   '.storybook',
+  'cypress',
+  'playwright',
+  'e2e',
+  'docs',
+  'tmp',
+  'temp',
+  '.pnpm-store',
 ]);
 
-export { IGNORE_DIRS };
+/** Prefer these folders when present so large repos aren't fully walked. */
+const PREFERRED_SCAN_ROOTS = [
+  'src',
+  'app',
+  'pages',
+  'components',
+  'lib',
+  'ui',
+  'packages',
+  'apps',
+] as const;
+
+export { IGNORE_DIRS, PREFERRED_SCAN_ROOTS };
 
 export function discoverProject(root: string): ProjectConfig {
   const resolved = path.resolve(root);
@@ -52,13 +79,69 @@ export function discoverProject(root: string): ProjectConfig {
     aliases,
     hasReact,
     hasReactNative,
+    proplabConfig: findPropLabConfig(resolved)?.relativePath ?? null,
   };
 }
 
-export function listSourceFiles(root: string): string[] {
+export function listSourceFiles(root: string, include?: string[]): string[] {
   const results: string[] = [];
-  walk(root, root, results);
-  return results;
+  const resolved = path.resolve(root);
+
+  if (include?.length) {
+    for (const rel of include) {
+      const abs = path.resolve(resolved, rel);
+      if (!fs.existsSync(abs)) continue;
+      const stat = fs.statSync(abs);
+      if (stat.isDirectory()) walk(resolved, abs, results);
+      else if (stat.isFile() && isSourceFileName(path.basename(abs))) results.push(abs);
+    }
+    return dedupe(results);
+  }
+
+  const preferred = PREFERRED_SCAN_ROOTS.map((name) => path.join(resolved, name)).filter(
+    (dir) => fs.existsSync(dir) && fs.statSync(dir).isDirectory(),
+  );
+
+  if (preferred.length === 0) {
+    walk(resolved, resolved, results);
+    return results;
+  }
+
+  for (const dir of preferred) {
+    const base = path.basename(dir);
+    if (base === 'packages' || base === 'apps') {
+      walkWorkspacePackages(resolved, dir, results);
+    } else {
+      walk(resolved, dir, results);
+    }
+  }
+
+  return dedupe(results);
+}
+
+function walkWorkspacePackages(root: string, workspaceDir: string, out: string[]): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(workspaceDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith('.') || IGNORE_DIRS.has(entry.name)) continue;
+    const pkgRoot = path.join(workspaceDir, entry.name);
+    const nested = ['src', 'app', 'pages', 'components', 'lib', 'ui']
+      .map((name) => path.join(pkgRoot, name))
+      .filter((dir) => fs.existsSync(dir) && fs.statSync(dir).isDirectory());
+
+    if (nested.length > 0) {
+      for (const dir of nested) walk(root, dir, out);
+    } else {
+      // Small packages with sources at the package root
+      walk(root, pkgRoot, out);
+    }
+  }
 }
 
 function walk(root: string, dir: string, out: string[]): void {
@@ -79,11 +162,28 @@ function walk(root: string, dir: string, out: string[]): void {
       continue;
     }
     if (!entry.isFile()) continue;
-    if (!/\.(tsx|jsx|ts|js)$/.test(entry.name)) continue;
-    if (/\.(test|spec|stories|story)\.(tsx|jsx|ts|js)$/.test(entry.name)) continue;
-    if (entry.name.endsWith('.d.ts')) continue;
+    if (!isSourceFileName(entry.name)) continue;
     out.push(full);
   }
+}
+
+function isSourceFileName(name: string): boolean {
+  if (!/\.(tsx|jsx|ts|js)$/.test(name)) return false;
+  if (/\.(test|spec|stories|story)\.(tsx|jsx|ts|js)$/.test(name)) return false;
+  if (name.endsWith('.d.ts')) return false;
+  if (/\.config\.(tsx?|jsx?|mjs|cjs)$/.test(name)) return false;
+  if (
+    /^(middleware|instrumentation|next-env|vite-env|react-app-env)\.(tsx?|jsx?)$/.test(
+      name,
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function dedupe(files: string[]): string[] {
+  return [...new Set(files)];
 }
 
 function findPackageJson(root: string): string {

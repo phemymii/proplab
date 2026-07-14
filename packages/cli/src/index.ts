@@ -17,28 +17,42 @@ program
   .option('--port <number>', 'Server port', '4591')
   .option('--no-open', 'Do not open browser automatically')
   .option('--no-watch', 'Disable filesystem watching')
+  .option(
+    '-i, --include <paths...>',
+    'Only scan these project-relative dirs/files (faster on large repos)',
+  )
   .option('--scan-only', 'Scan project and print stats without starting server')
   .action(async (options) => {
     const projectRoot = path.resolve(options.project);
     const port = parseInt(options.port, 10);
+    const include = normalizeInclude(options.include);
 
     console.log('');
     console.log(chalk.bold.hex('#0F766E')('  PropLab'), chalk.gray('— Component Lab'));
     console.log(chalk.gray(`  Project: ${projectRoot}`));
+    if (include?.length) {
+      console.log(chalk.gray(`  Include: ${include.join(', ')}`));
+    }
     console.log('');
 
     if (options.scanOnly) {
       const spinner = ora('Scanning components…').start();
       try {
-        const catalog = await scanProject({ root: projectRoot }, (progress: ScanProgress) => {
-          spinner.text = progress.message;
-        });
+        const catalog = await scanProject(
+          { root: projectRoot, include },
+          (progress: ScanProgress) => {
+            spinner.text = progress.message;
+          },
+        );
         spinner.succeed(`Scanned in ${catalog.stats.scanDurationMs}ms`);
         console.log('');
         console.log(chalk.bold('  Stats:'));
         console.log(`  ${chalk.hex('#0F766E')('Files:')}       ${catalog.stats.totalFiles}`);
         console.log(`  ${chalk.hex('#0F766E')('Components:')}  ${catalog.stats.totalComponents}`);
         console.log(`  ${chalk.hex('#0F766E')('With props:')}  ${catalog.stats.withProps}`);
+        if (catalog.config.proplabConfig) {
+          console.log(`  ${chalk.hex('#0F766E')('Config:')}     ${catalog.config.proplabConfig}`);
+        }
         console.log('');
 
         const sample = catalog.components.slice(0, 8);
@@ -71,6 +85,10 @@ program
         port,
         openBrowser: options.open !== false,
         watch: options.watch !== false,
+        include,
+        onProgress: (progress) => {
+          spinner.text = progress.message || 'Scanning…';
+        },
       });
 
       spinner.succeed(`Lab running at ${chalk.cyan.underline(server.url)}`);
@@ -89,5 +107,15 @@ program
       process.exit(1);
     }
   });
+
+function normalizeInclude(value: unknown): string[] | undefined {
+  if (!value) return undefined;
+  const list = Array.isArray(value) ? value : [value];
+  const paths = list
+    .flatMap((item) => String(item).split(','))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return paths.length ? paths : undefined;
+}
 
 program.parse();

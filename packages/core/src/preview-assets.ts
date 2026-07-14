@@ -8,11 +8,15 @@ const ROUTE_FILE_RE =
 const FRAMEWORK_ONLY_RE =
   /(^|\/)(next\.config\.|tailwind\.config\.|postcss\.config\.|metro\.config\.|babel\.config\.|app\.config\.)/;
 
+const PROPLAB_CONFIG_RE =
+  /(^|\/)(\.proplabrc|proplab\.config)\.(tsx?|jsx?)$/;
+
 /** Skip Next/Expo route entry files from the component catalog by default. */
 export function shouldSkipCatalogFile(relativePath: string, projectType: ProjectType): boolean {
   const norm = relativePath.replace(/\\/g, '/');
 
   if (FRAMEWORK_ONLY_RE.test(norm)) return true;
+  if (PROPLAB_CONFIG_RE.test(norm)) return true;
 
   if (
     projectType === 'nextjs' ||
