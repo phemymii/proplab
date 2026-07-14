@@ -25,7 +25,7 @@ Opens the lab at [http://localhost:4591](http://localhost:4591).
 | Tailwind / PostCSS | Works when project configs are present |
 | Compound / context components | Best-effort auto-wrapping (Radix-style) |
 | React Native / Expo | **Not solidly compatible yet** — catalog works; preview is experimental and often breaks on real Expo apps |
-| Config / providers / stories | `.proplabrc` decorators supported — see `examples/hard-cases` |
+| Config / providers / stories | `.proplabrc` decorators supported — see [`examples/hard-cases`](examples/hard-cases) |
 
 This is a **v0.1** experiment. Use it to explore component APIs and fixtures — not as a production design-system docs host yet.
 
@@ -73,10 +73,23 @@ Usage: proplab [options]
 Options:
   -p, --project <path>   Project root (default: cwd)
   --port <number>        Server port (default: 4591)
+  -i, --include <paths>  Only scan these dirs/files (faster on large repos)
+  --pull <paths>         Same as --include
   --no-open              Do not open the browser
   --no-watch             Disable filesystem watching
   --scan-only            Print catalog stats and exit
 ```
+
+On large monorepos, scope the scan:
+
+```bash
+npx proplab --include src/components
+npx proplab --pull src/components/Button.tsx src/components/Card.tsx
+npx proplab --projects /path/to/project --pull src/components/Card.tsx
+npx proplab --include apps/web/src packages/ui/src
+```
+
+`--include` / `--pull` limit what appears in the **catalog**. Preview still resolves imports from the rest of the project (so `Button` can render children it imports), but those dependencies won’t show up as separate sidebar entries unless you include their paths too.
 
 ---
 
@@ -115,6 +128,14 @@ npm run build
 node packages/cli/dist/index.js --project examples/demo-ui
 ```
 
+### Hard cases (`.proplabrc` decorators)
+
+[`examples/hard-cases`](examples/hard-cases) has components that read Auth / Theme / Form context. A [`.proplabrc.tsx`](examples/hard-cases/.proplabrc.tsx) wraps every preview with `AppProviders`.
+
+```bash
+npm run demo:hard
+```
+
 ---
 
 ## Features (current)
@@ -125,11 +146,12 @@ node packages/cli/dist/index.js --project examples/demo-ui
 - Named variants derived from enum + boolean props  
 - Live preview iframe via Vite middleware  
 - Props controls + live JSON  
-- Open in editor (`cursor` / `code`, or `PROPLAB_EDITOR`)  
+- **Open in editor** — opens the selected file (and line) via `cursor` / `code`, or `PROPLAB_EDITOR`  
 - Filesystem watch + WebSocket catalog refresh  
 - Light / dark lab UI  
 - Path alias resolution from `tsconfig` / `jsconfig` (including `extends`)  
 - Best-effort wrapping for compound components that need parent context  
+- Project `.proplabrc` / `proplab.config.*` decorators (global providers)  
 
 ---
 
@@ -176,31 +198,40 @@ Partial support only:
 
 ### React Native / Expo — not solidly compatible yet
 
-**Expo / React Native support is still early and unreliable.** PropLab can usually *find* components and generate props, but live preview is a best-effort browser path via `react-native-web`. Many real Expo apps will fail or look wrong.
+**Expo / React Native support is still early and unreliable.** PropLab can usually *find* components and generate props, but live preview is a best-effort browser path via `react-native-web` (not a native simulator). Many real Expo apps will fail or look wrong — especially anything that depends on native modules.
 
 Treat Expo as experimental: useful for simple presentational UI, not as a drop-in lab for production Expo codebases.
 
-Expect gaps around:
-
-- Native modules (Skia, camera, bluetooth, sensors, TrueSheet, …)  
-- Platform-specific APIs and native navigation  
-- Expo modules that have no web implementation  
-- Gesture / Reanimated / heavy Expo Router apps  
-
-Those components still appear in the catalog with editable props; the preview may show an error.
-
 ```bash
-# Catalog + experimental preview — results vary by component
-npx proplab --project ./apps/mobile
+# In your Expo app (required for any chance of live preview)
+npx expo install react-native-web react-dom
+
+npx proplab --project ./path/to/project
 ```
+
+What can work today (simple cases):
+
+- Catalog + prop fixtures for RN/Expo components  
+- `react-native` → `react-native-web` aliasing + `.web.*` extensions  
+- Soft shims/stubs for some Expo / RN packages so sibling UI can still load  
+
+Common failure modes:
+
+- Native-only modules (Skia, camera, bluetooth, secure store, TrueSheet, …)  
+- Reanimated / Gesture Handler / native navigation  
+- Heavy Expo Router apps and large dependency graphs  
+- Pixel-perfect iOS/Android layout  
+
+For a minimal smoke test, use the bundled kit: [`examples/expo-ui`](examples/expo-ui) (`npm run demo:expo`).
 
 ---
 
 ## Limitations
 
 - Early software — bugs, incomplete edge cases, and breaking changes are expected  
-- **Expo / React Native is not solidly compatible yet** — expect broken previews on many real apps  
-- Components that need custom providers (forms, themes, routers) may fail until configurable wrappers land  
+- **Expo / React Native is not solidly compatible yet** — expect broken previews on many real apps; catalog/listing is the more reliable part  
+- Large repos: PropLab prefers `src` / `app` / `pages` / `components` (and workspace packages) and skips non-UI files; use `--include` to narrow further  
+- Components that need custom providers (forms, themes, routers) — add a `.proplabrc` with decorators (see `examples/hard-cases`)  
 - Node-only packages (`sharp`, `nodemailer`, `fs`, …) are stubbed in preview  
 - Generated fixtures are heuristics — nested/index-signature types can look thin  
 - Global CSS is auto-injected when common entry files are found (`app/globals.css`, etc.)  
