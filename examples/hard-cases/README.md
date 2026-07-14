@@ -2,7 +2,7 @@
 
 Components that **cannot** preview from auto-generated props alone — they read
 React context and throw without providers. This kit demonstrates project-level
-`.proplabrc` decorators (Storybook-style).
+`.proplabrc` decorators.
 
 ## Why these need decorators
 
@@ -11,6 +11,7 @@ React context and throw without providers. This kit demonstrates project-level
 | `AccountBadge` | `AuthProvider` | `useAuth must be used within AuthProvider` |
 | `ThemedBanner` | `ThemeProvider` | `useTheme must be used within ThemeProvider` |
 | `ProfileFormField` | `FormProvider` | `useFormContext must be used within FormProvider` |
+| `SlotCard` | none | — (`icon` / `children` / `badge` / `footer` are `ReactNode` slots) |
 
 Dummy props (`showEmail`, `title`, `name`, …) are fine. The crash is missing
 **app shell**, not missing fixtures.
@@ -52,6 +53,8 @@ Or:
 npx proplab --project examples/hard-cases
 ```
 
-Open `AccountBadge`, `ThemedBanner`, or `ProfileFormField` — they should render
-with auth / theme / form wired in. Remove or rename `.proplabrc.tsx` to see the
-context errors again.
+Open `AccountBadge`, `ThemedBanner`, `ProfileFormField`, or `SlotCard` — the
+first three should render with auth / theme / form wired in. `SlotCard` shows
+`ReactNode` slots (`icon`, `children`, `badge`, `footer`) editable as text in
+the props panel. Remove or rename `.proplabrc.tsx` to see the context errors
+again on the provider-backed components.

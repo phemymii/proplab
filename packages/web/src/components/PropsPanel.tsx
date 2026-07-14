@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { PropField } from '@proplab/core';
 import { RotateCcw } from 'lucide-react';
 import { useExplorerStore } from '../store/explorer';
@@ -165,22 +166,39 @@ function PropControl({
     );
   }
 
-  if (field.kind === 'object' || field.kind === 'array') {
+  // ReactNode / slots — text fixtures (strings are valid nodes on web)
+  if (field.kind === 'reactNode') {
     return (
       <div>
         {label}
-        <textarea
-          className="props-textarea"
-          value={safeJson(value)}
-          onChange={(e) => {
-            try {
-              onChange(JSON.parse(e.target.value));
-            } catch {
-              // keep typing
-            }
-          }}
-          rows={4}
+        <TextPropEditor
+          value={typeof value === 'string' ? value : value == null ? '' : String(value)}
+          onChange={onChange}
+          rows={field.name === 'children' ? 3 : 2}
         />
+        <div className="prop-type-hint">
+          {field.typeText ? `${field.typeText} · ` : ''}
+          plain text or HTML (e.g. {'<div>Hey</div>'})
+        </div>
+      </div>
+    );
+  }
+
+  // Objects, arrays, and RN StyleProp / unresolved style bags — JSON, never free text
+  if (
+    field.kind === 'object' ||
+    field.kind === 'array' ||
+    isStyleLikeField(field)
+  ) {
+    return (
+      <div>
+        {label}
+        <JsonPropEditor
+          value={value}
+          emptyFallback={isStyleLikeField(field) ? EMPTY_STYLE : null}
+          onChange={onChange}
+        />
+        {field.typeText && <div className="prop-type-hint">{field.typeText}</div>}
       </div>
     );
   }
@@ -196,6 +214,101 @@ function PropControl({
       />
       {field.typeText && <div className="prop-type-hint">{field.typeText}</div>}
     </div>
+  );
+}
+
+const EMPTY_STYLE: Record<string, never> = Object.freeze({});
+
+function isStyleLikeField(field: PropField): boolean {
+  const t = field.typeText ?? '';
+  if (/\bStyleProp\b|(?:View|Text|Image)Style\b|RegisteredStyle\b/.test(t)) return true;
+  if (/Style$/.test(field.name) && field.kind === 'unknown') return true;
+  return false;
+}
+
+/** Local draft for text / ReactNode string fixtures so typing isn't lost. */
+function TextPropEditor({
+  value,
+  onChange,
+  rows = 2,
+}: {
+  value: string;
+  onChange: (value: unknown) => void;
+  rows?: number;
+}) {
+  const [text, setText] = useState(value);
+
+  useEffect(() => {
+    setText(value);
+  }, [value]);
+
+  return (
+    <textarea
+      className="props-textarea"
+      value={text}
+      onChange={(e) => {
+        const next = e.target.value;
+        setText(next);
+        onChange(next);
+      }}
+      rows={rows}
+      spellCheck={false}
+    />
+  );
+}
+
+/** Local draft text so intermediate JSON (e.g. `{`) isn't wiped by controlled value. */
+function JsonPropEditor({
+  value,
+  emptyFallback,
+  onChange,
+}: {
+  value: unknown;
+  emptyFallback: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const committed = value === undefined ? emptyFallback : value;
+  const [text, setText] = useState(() => safeJson(committed));
+  const [invalid, setInvalid] = useState(false);
+  const [committedKey, setCommittedKey] = useState(() => safeJson(committed));
+
+  // Sync from parent only when the stored value actually changed (not while drafting)
+  useEffect(() => {
+    const nextKey = safeJson(committed);
+    if (nextKey === committedKey) return;
+    setCommittedKey(nextKey);
+    setText(nextKey);
+    setInvalid(false);
+  }, [committed, committedKey]);
+
+  return (
+    <>
+      <textarea
+        className={`props-textarea${invalid ? ' props-textarea--invalid' : ''}`}
+        value={text}
+        onChange={(e) => {
+          const next = e.target.value;
+          setText(next);
+          try {
+            const parsed = JSON.parse(next) as unknown;
+            onChange(parsed);
+            setCommittedKey(safeJson(parsed));
+            setInvalid(false);
+          } catch {
+            setInvalid(true);
+          }
+        }}
+        onBlur={() => {
+          if (invalid) {
+            setText(safeJson(committed));
+            setInvalid(false);
+          }
+        }}
+        rows={4}
+        spellCheck={false}
+      />
+      {invalid && <div className="prop-type-hint">Invalid JSON — finish editing to apply</div>}
+    </>
   );
 }
 

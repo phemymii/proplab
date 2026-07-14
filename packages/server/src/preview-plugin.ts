@@ -65,7 +65,7 @@ function resolveDecorators(mod) {
 
 const decorators = resolveDecorators(PropLabConfigMod);
 
-/** Compose Storybook-style decorators around a preview tree (first = outermost). */
+/** Compose project decorators around a preview tree (first = outermost). */
 function applyDecorators(tree) {
   if (!decorators.length) return tree;
   return decorators.reduceRight((child, decorator) => {
@@ -215,6 +215,9 @@ if (!Component) {
   const rootEl = document.getElementById('root');
   const root = createRoot(rootEl);
   let currentProps = ${JSON.stringify(comp.fixtures)};
+  const REACT_NODE_PROPS = new Set(${JSON.stringify(
+    comp.props.fields.filter((f) => f.kind === 'reactNode').map((f) => f.name),
+  )});
   const ancestors = findAncestors(COMPONENT_NAME, Mod);
   // Export names wrapped around the component, outermost first.
   // Grown iteratively as context errors reveal which parents are required.
@@ -234,13 +237,40 @@ if (!Component) {
     return next;
   }
 
+  /** Text fixtures stay as strings; HTML markup becomes real DOM via innerHTML. */
+  function looksLikeHtml(value) {
+    if (typeof value !== 'string') return false;
+    const t = value.trim();
+    return t.length > 0 && /^<[a-zA-Z!/?]/.test(t);
+  }
+
+  function htmlToReactNode(html) {
+    return React.createElement('span', {
+      dangerouslySetInnerHTML: { __html: html },
+      style: { display: 'contents' },
+    });
+  }
+
+  function hydrateReactNodes(props) {
+    const next = { ...props };
+    for (const name of Object.keys(next)) {
+      if (!REACT_NODE_PROPS.has(name) && name !== 'children') continue;
+      const v = next[name];
+      if (looksLikeHtml(v)) next[name] = htmlToReactNode(v.trim());
+    }
+    return next;
+  }
+
   function isContextError(error) {
     const msg = String((error && error.message) || error);
     return /must be (used|rendered) within|must be wrapped in|useContext|missing.*(provider|context)|cannot read.*context/i.test(msg);
   }
 
   function buildTree() {
-    const ownProps = { ...ROOT_DEFAULT_PROPS[COMPONENT_NAME], ...stripFunctions(currentProps) };
+    const ownProps = {
+      ...ROOT_DEFAULT_PROPS[COMPONENT_NAME],
+      ...stripFunctions(hydrateReactNodes(currentProps)),
+    };
     let tree = React.createElement(Component, ownProps);
     for (let i = wrappers.length - 1; i >= 0; i--) {
       const name = wrappers[i];
@@ -375,11 +405,29 @@ if (!Component) {
   };
 }
 
-export function previewHtml(componentId: string, styleUrls: string[] = []): string {
+export function previewHtml(
+  componentId: string,
+  styleUrls: string[] = [],
+  options: { reactNative?: boolean } = {},
+): string {
   const encoded = encodeURIComponent(componentId);
   const styleTags = styleUrls
     .map((url) => `<link rel="stylesheet" href="${url}" />`)
     .join('\n  ');
+
+  const rnReset = options.reactNative
+    ? `
+    /* react-native-web expects a flex column root */
+    html, body, #root {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 100%;
+      height: 100%;
+    }
+    #root > * { max-width: 100%; }
+    `
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -399,6 +447,7 @@ export function previewHtml(componentId: string, styleUrls: string[] = []): stri
       color: #0f172a;
     }
     #root { padding: 24px; box-sizing: border-box; }
+    ${rnReset}
   </style>
 </head>
 <body>

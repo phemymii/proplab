@@ -1,15 +1,18 @@
 {
-  "name": "proplab-hard-cases",
+  "name": "proplab-expo-ui",
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "description": "Expo/RN-style components for PropLab web preview (react-native-web)",
   "dependencies": {
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-native-web": "^0.19.13"
   },
   "devDependencies": {
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@types/react-native": "^0.73.0",
     "typescript": "^5.7.2"
   }
 }

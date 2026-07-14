@@ -129,6 +129,10 @@ const VOID_COMPONENT_NAMES = new Set([
 ]);
 
 function shouldIncludeOptional(field: PropField, componentName: string): boolean {
+  if (field.kind === 'reactNode') {
+    if (field.name === 'children' && VOID_COMPONENT_NAMES.has(componentName)) return false;
+    return true;
+  }
   if (field.name === 'children') {
     return !VOID_COMPONENT_NAMES.has(componentName);
   }
@@ -174,7 +178,11 @@ function valueForField(field: PropField, componentName: string, depth: number): 
       return field.options?.[0] ?? null;
     case 'reactNode':
       if (field.name === 'children') return `${componentName} content`;
-      return field.name;
+      if (field.name === 'icon') return '★';
+      if (field.name === 'footer') return 'Footer note';
+      if (field.name === 'header') return 'Header';
+      if (field.name === 'badge') return 'New';
+      return `${field.name} content`;
     case 'array':
       if (field.item) {
         return [

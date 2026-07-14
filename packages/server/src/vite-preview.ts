@@ -66,6 +66,7 @@ const PREFER_OPTIMIZE = [
   'recharts',
   'input-otp',
   'next-themes',
+  'react-native-web',
 ];
 
 export interface PreviewViteOptions {
@@ -230,7 +231,7 @@ function loadProjectPostcss(
 
 function resolvePostcssPlugin(
   projectRoot: string,
-  requireFromProject: NodeRequire,
+  requireFromProject: NodeJS.Require,
   name: string,
 ): ((opts?: Record<string, unknown>) => unknown) | null {
   try {
@@ -247,7 +248,7 @@ function resolvePostcssPlugin(
 
 function tryLoadProjectViteConfig(
   projectRoot: string,
-  requireFromProject: NodeRequire,
+  requireFromProject: NodeJS.Require,
 ): UserConfig | null {
   for (const name of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs']) {
     const configPath = path.join(projectRoot, name);

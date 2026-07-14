@@ -21,11 +21,15 @@ program
     '-i, --include <paths...>',
     'Only scan these project-relative dirs/files (faster on large repos)',
   )
+  .option(
+    '--pull <paths...>',
+    'Alias for --include (e.g. --pull src/components/Button.tsx)',
+  )
   .option('--scan-only', 'Scan project and print stats without starting server')
   .action(async (options) => {
     const projectRoot = path.resolve(options.project);
     const port = parseInt(options.port, 10);
-    const include = normalizeInclude(options.include);
+    const include = normalizeInclude(options.include ?? options.pull);
 
     console.log('');
     console.log(chalk.bold.hex('#0F766E')('  PropLab'), chalk.gray('— Component Lab'));

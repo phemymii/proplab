@@ -66,7 +66,9 @@ export function discoverProject(root: string): ProjectConfig {
   };
 
   const hasReact = Boolean(deps.react);
-  const hasReactNative = Boolean(deps['react-native'] || deps.expo);
+  const hasReactNative = Boolean(
+    deps['react-native'] || deps.expo || deps['react-native-web'],
+  );
   const type = detectProjectType(resolved, deps);
   const packageManager = detectPackageManager(resolved);
   const aliases = resolveAliases(resolved);
@@ -92,8 +94,19 @@ export function listSourceFiles(root: string, include?: string[]): string[] {
       const abs = path.resolve(resolved, rel);
       if (!fs.existsSync(abs)) continue;
       const stat = fs.statSync(abs);
-      if (stat.isDirectory()) walk(resolved, abs, results);
-      else if (stat.isFile() && isSourceFileName(path.basename(abs))) results.push(abs);
+      if (stat.isDirectory()) {
+        walk(resolved, abs, results);
+        continue;
+      }
+      if (stat.isFile() && isSourceFileName(path.basename(abs))) {
+        results.push(abs);
+        // Co-located folder: Button.tsx → also scan Button/
+        const siblingDir = abs.replace(/\.(tsx|jsx|ts|js)$/, '');
+        if (siblingDir !== abs && fs.existsSync(siblingDir) && fs.statSync(siblingDir).isDirectory()) {
+          walk(resolved, siblingDir, results);
+        }
+        // Co-located index barrel next to a folder entry is already covered by dir walks
+      }
     }
     return dedupe(results);
   }

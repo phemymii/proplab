@@ -24,6 +24,7 @@ import { previewHtml, proplabPreviewPlugin } from './preview-plugin.js';
 import { nextShimsPlugin, serverActionStubPlugin } from './next-shims.js';
 import { reactNativeWebPlugin } from './rn-web.js';
 import { assertProjectDependencies, buildPreviewViteConfig } from './vite-preview.js';
+import { openProjectFile } from './open-editor.js';
 
 export interface ServerOptions {
   projectRoot: string;
@@ -103,7 +104,9 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   app.get('/__proplab_preview__', async (req, reply) => {
     if (!catalog) await doScan();
     const id = (req.query as { id?: string }).id ?? '';
-    const html = previewHtml(decodeURIComponent(id), styleUrls);
+    const html = previewHtml(decodeURIComponent(id), styleUrls, {
+      reactNative: projectConfig.hasReactNative,
+    });
     const transformed = await vite.transformIndexHtml('/__proplab_preview__', html);
     return reply.type('text/html').send(transformed);
   });
@@ -179,6 +182,35 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
     const result = await doScan();
     broadcast({ type: 'catalog-update', data: result });
     return { ok: true, stats: result.stats };
+  });
+
+  /**
+   * Open a catalog component in the local editor.
+   * Accepts `{ id }` only — never raw client paths — so we can't escape the project tree.
+   */
+  app.post('/api/open', async (req, reply) => {
+    if (!catalog) await doScan();
+    const body = (req.body ?? {}) as { id?: string };
+    const id = typeof body.id === 'string' ? body.id.trim() : '';
+    if (!id) {
+      return reply.status(400).send({ ok: false, error: 'Missing component id' });
+    }
+
+    const component = getComponentById(catalog!, id);
+    if (!component) {
+      return reply.status(404).send({ ok: false, error: 'Component not found' });
+    }
+
+    const result = await openProjectFile({
+      projectRoot,
+      filePath: component.filePath,
+      line: component.line,
+    });
+
+    if (!result.ok) {
+      return reply.status(400).send(result);
+    }
+    return result;
   });
 
   app.get('/ws', { websocket: true }, (socket) => {

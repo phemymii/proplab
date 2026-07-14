@@ -311,7 +311,23 @@ function describeType(
   seen: Set<string>,
   depth: number,
 ): PropField {
-  const kind = classifyType(type, typeText);
+  let kind = classifyType(type, typeText);
+  // RN StyleProp<ViewStyle> etc. often resolve as opaque unions → "unknown";
+  // never treat those as free-form strings (crashes react-native-web).
+  if (isRnStyleTypeText(typeText)) {
+    kind = 'object';
+  } else if (isReactNodeTypeText(typeText)) {
+    kind = 'reactNode';
+  } else if ((kind === 'unknown' || kind === 'union') && /Style$/.test(name)) {
+    kind = 'object';
+  } else if (
+    (kind === 'unknown' || kind === 'union') &&
+    /^(children|icon|footer|header|badge|prefix|suffix|extra|action|leading|trailing|startContent|endContent|titleAccessory)$/.test(
+      name,
+    )
+  ) {
+    kind = 'reactNode';
+  }
   const field: PropField = {
     name,
     kind,
@@ -328,7 +344,10 @@ function describeType(
   }
 
   if (kind === 'object') {
-    field.fields = typeToFields(type, checker, seen, depth + 1);
+    // Don't expand RN style bags (ViewStyle has 100+ keys) — JSON editor is enough
+    if (!isRnStyleTypeText(typeText)) {
+      field.fields = typeToFields(type, checker, seen, depth + 1);
+    }
   }
 
   if (kind === 'array') {
@@ -351,17 +370,36 @@ function describeType(
   return field;
 }
 
+/** React Native style bags — objects/arrays, never CSS strings. */
+function isRnStyleTypeText(typeText: string): boolean {
+  const text = typeText.replace(/\s+/g, ' ');
+  return (
+    /\bStyleProp\b/.test(text) ||
+    /\b(?:View|Text|Image)Style\b/.test(text) ||
+    /\bRegisteredStyle\b/.test(text)
+  );
+}
+
+/** React children / slot types — editable as text fixtures in the lab. */
+function isReactNodeTypeText(typeText: string): boolean {
+  const text = typeText.replace(/\s+/g, ' ');
+  if (REACT_NODE_NAMES.has(text)) return true;
+  if (/React\.(ReactNode|ReactElement)/.test(text)) return true;
+  if (/\bReactNode\b|\bReactElement\b/.test(text)) return true;
+  if (text === 'JSX.Element' || /\bJSX\.Element\b/.test(text)) return true;
+  return false;
+}
+
 function classifyType(type: Type, typeText: string): PropKind {
   const text = typeText.replace(/\s+/g, ' ');
+
+  if (isRnStyleTypeText(text)) return 'object';
+  if (isReactNodeTypeText(text)) return 'reactNode';
 
   if (type.isString() || text === 'string') return 'string';
   if (type.isNumber() || text === 'number') return 'number';
   if (type.isBoolean() || text === 'boolean') return 'boolean';
   if (type.isStringLiteral() || type.isNumberLiteral() || type.isBooleanLiteral()) return 'enum';
-
-  if (REACT_NODE_NAMES.has(text) || /React\.(ReactNode|ReactElement)/.test(text) || text === 'JSX.Element') {
-    return 'reactNode';
-  }
 
   if (type.getCallSignatures().length > 0 || /\([^)]*\)\s*=>/.test(text) || text.startsWith('Function')) {
     return 'function';

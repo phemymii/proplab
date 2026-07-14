@@ -2,7 +2,7 @@ import type { ComponentType, ReactNode } from 'react';
 import { AppProviders } from './src/providers/AppProviders';
 
 /**
- * Project-level PropLab config (Storybook-style decorators).
+ * Project-level PropLab config (preview decorators / providers).
  *
  * Loaded automatically when you run `npx proplab` in this folder.
  * Every preview is wrapped with AppProviders so Auth / Theme / Form

@@ -1,6 +1,6 @@
 {
   "name": "proplab-workspace",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Zero-config component lab — discover components, generate props, preview live",
   "license": "MIT",
@@ -22,6 +22,7 @@
     "start": "npm run build && node packages/cli/dist/index.js",
     "demo": "npm run build && node packages/cli/dist/index.js --project examples/demo-ui --no-open",
     "demo:hard": "npm run build && node packages/cli/dist/index.js --project examples/hard-cases --no-open",
+    "demo:expo": "npm run build && node packages/cli/dist/index.js --project examples/expo-ui --no-open",
     "publish:packages": "npm run build && npm publish -w @proplab/core && npm publish -w @proplab/server && npm publish -w proplab"
   },
   "engines": {

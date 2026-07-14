@@ -148,10 +148,11 @@ export function mightContainComponents(filePath: string): boolean {
 
   if (!/\bexport\b/.test(text)) return false;
 
-  // Strong React / JSX signals
+  // Strong React / JSX / RN signals
   if (
     /from\s+['"]react(?:-dom)?(?:\/[^'"]*)?['"]/.test(text) ||
-    /require\(\s*['"]react(?:-dom)?['"]\s*\)/.test(text) ||
+    /from\s+['"]react-native(?:-web)?(?:\/[^'"]*)?['"]/.test(text) ||
+    /require\(\s*['"]react(?:-dom|native)?['"]\s*\)/.test(text) ||
     /<[A-Z][A-Za-z0-9.]*[\s/>]/.test(text) ||
     /React\.(?:FC|FunctionComponent|memo|forwardRef|createElement)/.test(text)
   ) {
