@@ -23,7 +23,7 @@ export async function scanProject(
 
   const config = discoverProject(options.root);
   const discovered = listSourceFiles(config.root, options.include).filter((f) => {
-    const rel = path.relative(config.root, f);
+    const rel = toPosixPath(path.relative(config.root, f));
     if (options.exclude?.some((p) => rel.includes(p))) return false;
     if (shouldSkipCatalogFile(rel, config.type)) return false;
     return true;
@@ -177,7 +177,8 @@ function extractComponentsFromFile(
   root: string,
   project: Project,
 ): ComponentInfo[] {
-  const relativePath = path.relative(root, filePath);
+  // Always POSIX separators so IDs match across Windows URL / Vite lookups
+  const relativePath = toPosixPath(path.relative(root, filePath));
   const results: ComponentInfo[] = [];
   const seen = new Set<string>();
 
@@ -302,7 +303,36 @@ function inferDefaultName(symbolName: string, filePath: string): string {
 }
 
 export function getComponentById(catalog: LabCatalog, id: string): ComponentInfo | undefined {
-  return catalog.components.find((c) => c.id === id || encodeURIComponent(c.id) === id);
+  const needle = normalizeComponentId(id);
+  if (!needle) return undefined;
+  return catalog.components.find((c) => {
+    const cid = normalizeComponentId(c.id);
+    return (
+      cid === needle ||
+      c.id === id ||
+      encodeURIComponent(c.id) === id ||
+      encodeURIComponent(cid) === id
+    );
+  });
+}
+
+/** Decode URI encoding and force `/` so Windows `\` IDs match web requests. */
+export function normalizeComponentId(id: string): string {
+  let value = id.trim();
+  if (!value) return value;
+  try {
+    // Fastify/Vite may pass already-decoded IDs; only decode when needed
+    if (/%[0-9A-Fa-f]{2}/.test(value)) {
+      value = decodeURIComponent(value);
+    }
+  } catch {
+    // keep raw
+  }
+  return toPosixPath(value);
+}
+
+function toPosixPath(p: string): string {
+  return p.replace(/\\/g, '/');
 }
 
 export function searchComponents(catalog: LabCatalog, query: string): ComponentInfo[] {

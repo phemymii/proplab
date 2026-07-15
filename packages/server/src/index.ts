@@ -18,6 +18,7 @@ import {
   discoverPreviewStyles,
   findPropLabConfig,
   PROPLAB_CONFIG_NAMES,
+  normalizeComponentId,
   type LabCatalog,
 } from '@proplab/core';
 import { previewHtml, proplabPreviewPlugin } from './preview-plugin.js';
@@ -104,7 +105,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   app.get('/__proplab_preview__', async (req, reply) => {
     if (!catalog) await doScan();
     const id = (req.query as { id?: string }).id ?? '';
-    const html = previewHtml(decodeURIComponent(id), styleUrls, {
+    const html = previewHtml(normalizeComponentId(id), styleUrls, {
       reactNative: projectConfig.hasReactNative,
     });
     const transformed = await vite.transformIndexHtml('/__proplab_preview__', html);
@@ -164,8 +165,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   app.get('/api/components/*', async (req, reply) => {
     if (!catalog) await doScan();
     const wildcard = (req.params as Record<string, string>)['*'] ?? '';
-    const id = decodeURIComponent(wildcard);
-    const component = getComponentById(catalog!, id);
+    const component = getComponentById(catalog!, normalizeComponentId(wildcard));
     if (!component) {
       return reply.status(404).send({ error: 'Component not found' });
     }

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import type { ComponentInfo } from '@proplab/core';
+import { normalizeComponentId } from '@proplab/core';
 
 const VIRTUAL_PREFIX = '\0proplab-preview:';
 
@@ -23,10 +24,11 @@ export function proplabPreviewPlugin(
     load(id) {
       if (!id.startsWith(VIRTUAL_PREFIX)) return null;
       const componentId = id.slice(VIRTUAL_PREFIX.length);
-      const comp = getComponent(decodeURIComponent(componentId));
+      const decodedId = normalizeComponentId(componentId);
+      const comp = getComponent(decodedId) ?? getComponent(componentId);
       if (!comp) {
         return `
-          document.body.innerHTML = '<pre style="font:14px ui-monospace,monospace;padding:24px;color:#b91c1c">Component not found: ${JSON.stringify(componentId)}</pre>';
+          document.body.innerHTML = '<pre style="font:14px ui-monospace,monospace;padding:24px;color:#b91c1c">Component not found: ${JSON.stringify(decodedId || componentId)}</pre>';
         `;
       }
 

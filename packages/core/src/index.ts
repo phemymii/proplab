@@ -17,5 +17,5 @@ export { findPropLabConfig, PROPLAB_CONFIG_NAMES } from './config.js';
 export type { PropLabConfigFile } from './config.js';
 export { extractPropSchema } from './props.js';
 export { generateFixtures, generateVariants } from './fixtures.js';
-export { scanProject, getComponentById, searchComponents, mightContainComponents } from './scanner.js';
+export { scanProject, getComponentById, normalizeComponentId, searchComponents, mightContainComponents } from './scanner.js';
 export { shouldSkipCatalogFile, discoverPreviewStyles } from './preview-assets.js';
