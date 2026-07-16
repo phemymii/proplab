@@ -1,6 +1,6 @@
 {
   "name": "@proplab/server",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "PropLab local server — API, live preview, and web UI",
   "type": "module",
   "main": "./dist/index.js",
@@ -37,7 +37,7 @@
     "@fastify/middie": "^9.0.2",
     "@fastify/static": "^8.0.3",
     "@fastify/websocket": "^11.0.1",
-    "@proplab/core": "0.1.3",
+    "@proplab/core": "0.1.4",
     "@vitejs/plugin-react": "^4.3.4",
     "chokidar": "^4.0.3",
     "fastify": "^5.2.0",

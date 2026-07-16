@@ -1,6 +1,6 @@
 {
   "name": "proplab",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Zero-config component lab — discover components, generate props, preview live",
   "type": "module",
   "bin": {
@@ -38,8 +38,8 @@
     "url": "https://github.com/phemymii/proplab/issues"
   },
   "dependencies": {
-    "@proplab/core": "0.1.3",
-    "@proplab/server": "0.1.3",
+    "@proplab/core": "0.1.4",
+    "@proplab/server": "0.1.4",
     "chalk": "^5.4.1",
     "commander": "^12.1.0",
     "ora": "^8.1.1"

@@ -1,6 +1,6 @@
 {
   "name": "@proplab/web",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@proplab/core": "0.1.3",
+    "@proplab/core": "0.1.4",
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.469.0",
     "react": "^18.3.1",

@@ -138,7 +138,7 @@ npm run demo:hard
 
 ### Tailwind + Next.js
 
-[`examples/tailwind-next`](examples/tailwind-next) — App Router + Tailwind (`TwButton`, `TwBadge`, `TwCard`, `TwAlert`):
+[`examples/tailwind-next`](examples/tailwind-next) is a minimal App Router kit with Tailwind (`TwButton`, `TwBadge`, `TwCard`, `TwAlert`). PropLab loads the project’s PostCSS / Tailwind config and injects `app/globals.css`.
 
 ```bash
 cd examples/tailwind-next && npm install && cd ../..

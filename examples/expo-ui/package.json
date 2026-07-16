@@ -1,7 +1,7 @@
 {
   "name": "proplab-expo-ui",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "description": "Expo/RN-style components for PropLab web preview (react-native-web)",
   "dependencies": {
