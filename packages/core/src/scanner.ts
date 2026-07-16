@@ -182,12 +182,18 @@ function extractComponentsFromFile(
     const id = `${relativePath}::${exportName}`;
     if (seen.has(id)) return;
     seen.add(id);
-    const props = extractPropSchema(
-      sourceFile,
-      isDefaultExport ? name : exportName,
-      isDefaultExport,
-      project,
-    );
+    let props;
+    try {
+      props = extractPropSchema(
+        sourceFile,
+        isDefaultExport ? name : exportName,
+        isDefaultExport,
+        project,
+      );
+    } catch {
+      // Isolate stack overflows / broken types so one file can't kill the whole scan
+      props = { fields: [] };
+    }
     results.push({
       id,
       name,

@@ -15,10 +15,10 @@ const POSTCSS_NAMES = [
 ];
 
 const TAILWIND_NAMES = [
-  'tailwind.config.ts',
+  'tailwind.config.cjs',
   'tailwind.config.js',
   'tailwind.config.mjs',
-  'tailwind.config.cjs',
+  'tailwind.config.ts',
 ];
 
 const SKIP_OPTIMIZE = new Set([
@@ -188,12 +188,36 @@ function loadProjectPostcss(
   requireFromProject: NodeRequire,
 ): UserConfig['css'] extends { postcss?: infer P } ? P : never | undefined {
   const configPath = findConfigFile(projectRoot, POSTCSS_NAMES);
+  const tailwindConfigPath = findConfigFile(projectRoot, TAILWIND_NAMES);
+  const tailwindPlugin = resolvePostcssPlugin(projectRoot, requireFromProject, 'tailwindcss');
+  const autoprefixerPlugin = resolvePostcssPlugin(projectRoot, requireFromProject, 'autoprefixer');
+
+  // Always prefer an explicit plugin list with absolute Tailwind content paths.
+  // PropLab's cwd is often the monorepo root — relative content globs then miss the project.
+  if (tailwindPlugin && tailwindConfigPath) {
+    try {
+      const twConfig = loadTailwindConfig(projectRoot, tailwindConfigPath, requireFromProject);
+      const plugins: unknown[] = [
+        tailwindPlugin({
+          config: twConfig,
+        }),
+      ];
+      if (autoprefixerPlugin) plugins.push(autoprefixerPlugin());
+      console.info('[proplab] Tailwind/PostCSS enabled for preview');
+      return { plugins } as never;
+    } catch (err) {
+      console.warn(
+        '[proplab] Could not configure Tailwind for preview:',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
   if (!configPath) return undefined;
 
   try {
     const raw = requireFromProject(configPath);
     const config = raw?.default ?? raw;
-    const tailwindConfig = findConfigFile(projectRoot, TAILWIND_NAMES);
 
     // postcss.config.js plugins: { tailwindcss: {}, autoprefixer: {} }
     if (config?.plugins && !Array.isArray(config.plugins) && typeof config.plugins === 'object') {
@@ -202,11 +226,12 @@ function loadProjectPostcss(
         const pluginModule = resolvePostcssPlugin(projectRoot, requireFromProject, pluginName);
         if (!pluginModule) continue;
 
-        if (pluginName === 'tailwindcss' && tailwindConfig) {
+        if (pluginName === 'tailwindcss' && tailwindConfigPath) {
+          const twConfig = loadTailwindConfig(projectRoot, tailwindConfigPath, requireFromProject);
           resolvedPlugins.push(
             pluginModule({
               ...(pluginOpts as Record<string, unknown>),
-              config: tailwindConfig,
+              config: twConfig,
             }),
           );
         } else {
@@ -227,6 +252,59 @@ function loadProjectPostcss(
   }
 
   return undefined;
+}
+
+/**
+ * Load Tailwind config and rewrite `content` globs to absolute paths under the
+ * project root. Relative globs resolve against process.cwd() (often the PropLab
+ * monorepo), which yields an empty utility CSS sheet.
+ */
+function loadTailwindConfig(
+  projectRoot: string,
+  configPath: string,
+  requireFromProject: NodeRequire,
+): Record<string, unknown> {
+  let raw: Record<string, unknown> = {};
+  try {
+    if (configPath.endsWith('.ts') || configPath.endsWith('.mjs')) {
+      // Prefer reading via jiti-less fallback: evaluate JS/CJS sibling or defaults
+      try {
+        const mod = requireFromProject(configPath);
+        raw = (mod?.default ?? mod) as Record<string, unknown>;
+      } catch {
+        raw = {};
+      }
+    } else {
+      const mod = requireFromProject(configPath);
+      raw = (mod?.default ?? mod) as Record<string, unknown>;
+    }
+  } catch {
+    raw = {};
+  }
+
+  const defaults = defaultTailwindContent(projectRoot);
+  const content = Array.isArray(raw.content) ? (raw.content as unknown[]) : defaults;
+  const absoluteContent = content
+    .map((entry) => {
+      if (typeof entry !== 'string') return entry;
+      if (path.isAbsolute(entry)) return entry;
+      return path.resolve(projectRoot, entry);
+    })
+    .filter(Boolean);
+
+  return {
+    ...raw,
+    content: absoluteContent.length > 0 ? absoluteContent : defaults,
+  };
+}
+
+function defaultTailwindContent(projectRoot: string): string[] {
+  return [
+    path.join(projectRoot, 'app/**/*.{js,ts,jsx,tsx,mdx}'),
+    path.join(projectRoot, 'src/**/*.{js,ts,jsx,tsx,mdx}'),
+    path.join(projectRoot, 'pages/**/*.{js,ts,jsx,tsx,mdx}'),
+    path.join(projectRoot, 'components/**/*.{js,ts,jsx,tsx,mdx}'),
+  ];
 }
 
 function resolvePostcssPlugin(

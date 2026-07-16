@@ -57,29 +57,115 @@ const UNSAFE_INTRINSIC_PROPS = new Set([
   'suppressHydrationWarning',
 ]);
 
+/** Hard caps — large Windows repos + circular types used to blow the call stack. */
+const MAX_TYPE_DEPTH = 4;
+const MAX_FIELDS_PER_TYPE = 40;
+const MAX_TYPE_TEXT_LEN = 240;
+
+const SKIP_EXPAND_TYPE_NAMES = new Set([
+  'HTMLElement',
+  'Element',
+  'Node',
+  'Document',
+  'Window',
+  'Event',
+  'MouseEvent',
+  'KeyboardEvent',
+  'CSSProperties',
+  'SVGElement',
+  'ReactElement',
+  'ReactNode',
+  'ReactPortal',
+  'JSX.Element',
+  'FormEvent',
+  'ChangeEvent',
+  'SyntheticEvent',
+  'RefObject',
+  'MutableRefObject',
+  'Ref',
+]);
+
+interface ExpandCtx {
+  /** Property keys already emitted (name:typeText) */
+  seenProps: Set<string>;
+  /** Compiler type ids currently on the expansion stack (cycle break) */
+  expanding: Set<number>;
+}
+
+function newExpandCtx(): ExpandCtx {
+  return { seenProps: new Set(), expanding: new Set() };
+}
+
 export function extractPropSchema(
   sourceFile: SourceFile,
   exportName: string,
   isDefault: boolean,
   project: Project,
 ): PropSchema {
-  const checker = project.getTypeChecker();
-  const componentNode = findComponentDeclaration(sourceFile, exportName, isDefault);
-  if (!componentNode) {
-    return { fields: [] };
-  }
+  try {
+    const checker = project.getTypeChecker();
+    const componentNode = findComponentDeclaration(sourceFile, exportName, isDefault);
+    if (!componentNode) {
+      return { fields: [] };
+    }
 
-  const propsType = resolvePropsType(componentNode, checker);
-  if (!propsType) {
-    return { fields: [] };
-  }
+    const propsType = resolvePropsType(componentNode, checker);
+    if (!propsType) {
+      return { fields: [] };
+    }
 
-  const typeName = propsType.getSymbol()?.getName();
-  const fields = typeToFields(propsType, checker, new Set(), 0);
-  return {
-    fields,
-    typeName: typeName && typeName !== '__type' ? typeName : undefined,
-  };
+    const typeName = propsType.getSymbol()?.getName();
+    const fields = typeToFields(propsType, checker, newExpandCtx(), 0);
+    return {
+      fields,
+      typeName: typeName && typeName !== '__type' ? typeName : undefined,
+    };
+  } catch (err) {
+    // Circular / enormous types can throw RangeError: Maximum call stack size exceeded
+    if (isStackOverflow(err)) {
+      return { fields: [] };
+    }
+    throw err;
+  }
+}
+
+function isStackOverflow(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return (
+    err instanceof RangeError ||
+    /maximum call stack|stack overflow|out of stack/i.test(err.message)
+  );
+}
+
+/** Safe type text — getText() itself can stack-overflow on circular types. */
+function safeTypeText(type: Type): string {
+  try {
+    const alias = type.getAliasSymbol()?.getName();
+    if (alias && alias !== '__type' && alias !== 'default') return alias;
+    const sym = type.getSymbol()?.getName();
+    if (sym && sym !== '__type' && sym !== 'default' && !sym.startsWith('__')) {
+      // Prefer short symbol names over fully expanded import("…").Foo dumps
+      if (!sym.includes(' ') && sym.length < 80) return sym;
+    }
+    const text = type.getText(
+      undefined,
+      TypeFormatFlags.UseAliasDefinedOutsideCurrentScope,
+    );
+    return simplifyTypeText(text);
+  } catch {
+    return type.getAliasSymbol()?.getName()
+      ?? type.getSymbol()?.getName()
+      ?? 'unknown';
+  }
+}
+
+function compilerTypeId(type: Type): number | null {
+  try {
+    const id = (type.compilerType as { id?: number } | undefined)?.id;
+    return typeof id === 'number' ? id : null;
+  } catch {
+    return null;
+  }
 }
 
 function findComponentDeclaration(
@@ -204,75 +290,129 @@ function propsFromComponentType(type: Type, checker: TypeChecker): Type | undefi
 function typeToFields(
   type: Type,
   checker: TypeChecker,
-  seen: Set<string>,
+  ctx: ExpandCtx,
   depth: number,
 ): PropField[] {
-  if (depth > 6) return [];
+  if (depth > MAX_TYPE_DEPTH) return [];
 
-  // Unwrap nullish unions + Promise / Readonly lightly so PageObject | null expands
-  const apparent = unwrapNullish(type.getApparentType());
+  let apparent: Type;
+  try {
+    apparent = unwrapNullish(type.getApparentType());
+  } catch {
+    return [];
+  }
   const target = apparent.isUnion() ? preferConstructiveUnionMember(apparent) : apparent;
 
-  if (target.isIntersection()) {
+  const typeId = compilerTypeId(target);
+  if (typeId != null) {
+    if (ctx.expanding.has(typeId)) return []; // circular: Foo → bar: Foo
+    ctx.expanding.add(typeId);
+  }
+
+  try {
+    if (shouldSkipExpandingType(target)) return [];
+
+    if (target.isIntersection()) {
+      const fields: PropField[] = [];
+      const names = new Set<string>();
+      for (const part of target.getIntersectionTypes()) {
+        for (const field of typeToFields(part, checker, ctx, depth)) {
+          if (names.has(field.name)) continue;
+          names.add(field.name);
+          fields.push(field);
+          if (fields.length >= MAX_FIELDS_PER_TYPE) return fields;
+        }
+      }
+      return fields;
+    }
+
+    let props;
+    try {
+      props = target.getProperties();
+    } catch {
+      return [];
+    }
+
     const fields: PropField[] = [];
-    const names = new Set<string>();
-    for (const part of target.getIntersectionTypes()) {
-      for (const field of typeToFields(part, checker, seen, depth)) {
-        if (names.has(field.name)) continue;
-        names.add(field.name);
-        fields.push(field);
+
+    for (const prop of props) {
+      if (fields.length >= MAX_FIELDS_PER_TYPE) break;
+
+      const name = prop.getName();
+      if (name.startsWith('__@') || name === 'key' || name === 'ref') continue;
+
+      const decls = prop.getDeclarations();
+      const decl = decls[0];
+      if (!decl) continue;
+
+      if (UNSAFE_INTRINSIC_PROPS.has(name)) continue;
+
+      let declarationPath = '';
+      try {
+        declarationPath = decl.getSourceFile().getFilePath().replace(/\\/g, '/');
+      } catch {
+        // ignore
+      }
+      const isInheritedReactDomProp =
+        declarationPath.includes('/node_modules/@types/react/') ||
+        declarationPath.includes('/node_modules/react/index.d.ts') ||
+        declarationPath.includes('/node_modules/@types/react-native/');
+      if (isInheritedReactDomProp && !SAFE_INTRINSIC_PROPS.has(name)) continue;
+
+      if (isDomIntrinsicDump(target, name)) continue;
+
+      let propType: Type;
+      try {
+        propType = checker.getTypeOfSymbolAtLocation(prop, decl);
+      } catch {
+        continue;
+      }
+
+      const typeText = safeTypeText(propType);
+      const key = `${name}:${typeText}`;
+      if (ctx.seenProps.has(key)) continue;
+      ctx.seenProps.add(key);
+
+      const required = !(
+        (typeof prop.isOptional === 'function' && prop.isOptional()) ||
+        (Node.isPropertySignature(decl) && decl.hasQuestionToken()) ||
+        typeText.includes('| undefined')
+      );
+
+      try {
+        fields.push(describeType(name, propType, checker, required, typeText, ctx, depth));
+      } catch (err) {
+        if (isStackOverflow(err)) {
+          fields.push({ name, kind: 'unknown', required, typeText });
+          continue;
+        }
+        throw err;
       }
     }
+
     return fields;
+  } finally {
+    if (typeId != null) ctx.expanding.delete(typeId);
   }
+}
 
-  const props = target.getProperties();
-  const fields: PropField[] = [];
-
-  for (const prop of props) {
-    const name = prop.getName();
-    if (name.startsWith('__@') || name === 'key' || name === 'ref') continue;
-
-    const decls = prop.getDeclarations();
-    const decl = decls[0];
-    if (!decl) continue;
-
-    if (UNSAFE_INTRINSIC_PROPS.has(name)) continue;
-
-    const declarationPath = decl.getSourceFile().getFilePath().replace(/\\/g, '/');
-    const isInheritedReactDomProp =
-      declarationPath.includes('/node_modules/@types/react/') ||
-      declarationPath.includes('/node_modules/react/index.d.ts');
-    if (isInheritedReactDomProp && !SAFE_INTRINSIC_PROPS.has(name)) continue;
-
-    // Skip HTML intrinsic dumps that explode schema size
-    if (isDomIntrinsicDump(target, name)) continue;
-
-    const propType = checker.getTypeOfSymbolAtLocation(prop, decl);
-    const typeText = propType.getText(
-      undefined,
-      TypeFormatFlags.UseAliasDefinedOutsideCurrentScope,
-    );
-
-    const key = `${name}:${typeText}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const required = !(
-      (typeof prop.isOptional === 'function' && prop.isOptional()) ||
-      (Node.isPropertySignature(decl) && decl.hasQuestionToken()) ||
-      typeText.includes('| undefined')
-    );
-
-    const field = describeType(name, propType, checker, required, typeText, seen, depth);
-    fields.push(field);
+function shouldSkipExpandingType(type: Type): boolean {
+  const alias = type.getAliasSymbol()?.getName();
+  if (alias && SKIP_EXPAND_TYPE_NAMES.has(alias)) return true;
+  const sym = type.getSymbol()?.getName();
+  if (sym && SKIP_EXPAND_TYPE_NAMES.has(sym)) return true;
+  try {
+    const props = type.getProperties();
+    // Huge DOM / library bags — do not walk
+    if (props.length > 80) return true;
+  } catch {
+    return true;
   }
-
-  return fields;
+  return false;
 }
 
 function isDomIntrinsicDump(type: Type, propName: string): boolean {
-  const text = type.getText();
+  const text = safeTypeText(type);
   // Avoid expanding full HTML attribute bags
   if (
     /HTMLAttributes|DOMAttributes|AriaAttributes|SVGAttributes|ClassAttributes/.test(text) &&
@@ -308,14 +448,11 @@ function describeType(
   checker: TypeChecker,
   required: boolean,
   typeText: string,
-  seen: Set<string>,
+  ctx: ExpandCtx,
   depth: number,
 ): PropField {
   const unwrapped = unwrapNullish(type);
-  const unwrappedText = unwrapped.getText(
-    undefined,
-    TypeFormatFlags.UseAliasDefinedOutsideCurrentScope,
-  );
+  const unwrappedText = safeTypeText(unwrapped);
   let kind = classifyType(unwrapped, unwrappedText);
 
   // RN StyleProp<ViewStyle> etc. often resolve as opaque unions → "unknown";
@@ -333,16 +470,11 @@ function describeType(
     )
   ) {
     kind = 'reactNode';
-  }
-
-  // Imported aliases (PathObjectType) that failed to classify — try expanding properties
-  if (kind === 'unknown' || kind === 'union') {
-    const nested = typeToFields(unwrapped, checker, seen, depth + 1);
-    if (nested.length > 0) {
-      kind = 'object';
-    } else if (looksLikeTypeAliasName(unwrappedText) || looksLikeTypeAliasName(typeText)) {
-      kind = 'object';
-    }
+  } else if (
+    (kind === 'unknown' || kind === 'union') &&
+    (looksLikeTypeAliasName(unwrappedText) || looksLikeTypeAliasName(typeText))
+  ) {
+    kind = 'object';
   }
 
   const display = formatTypeText(type, unwrapped, typeText);
@@ -368,36 +500,42 @@ function describeType(
   }
 
   if (field.kind === 'object') {
-    // Don't expand RN style bags (ViewStyle has 100+ keys) — JSON editor is enough
-    if (!isRnStyleTypeText(typeText) && !isRnStyleTypeText(unwrappedText)) {
-      field.fields = typeToFields(unwrapped, checker, seen, depth + 1);
+    // Don't expand RN style bags / huge / cyclic types
+    if (
+      !isRnStyleTypeText(typeText) &&
+      !isRnStyleTypeText(unwrappedText) &&
+      !shouldSkipExpandingType(unwrapped) &&
+      depth < MAX_TYPE_DEPTH
+    ) {
+      field.fields = typeToFields(unwrapped, checker, ctx, depth + 1);
     }
   }
 
-  if (field.kind === 'array') {
-    const args = unwrapped.getTypeArguments();
-    const element = unwrapped.getArrayElementType?.() ?? args[0];
-    if (element) {
-      const elText = element.getText(
-        undefined,
-        TypeFormatFlags.UseAliasDefinedOutsideCurrentScope,
-      );
-      field.item = describeType(
-        'item',
-        element,
-        checker,
-        true,
-        elText,
-        seen,
-        depth + 1,
-      );
-      if (field.item.fields?.length) {
-        const shape = `{ ${field.item.fields.map((f) => `${f.name}: ${f.typeText}`).join('; ')} }`;
-        field.item.typeText = shape;
-        field.typeText = `${shape}[]`;
-      } else if (field.item.typeText) {
-        field.typeText = `${field.item.typeText}[]`;
+  if (field.kind === 'array' && depth < MAX_TYPE_DEPTH) {
+    try {
+      const args = unwrapped.getTypeArguments();
+      const element = unwrapped.getArrayElementType?.() ?? args[0];
+      if (element) {
+        const elText = safeTypeText(element);
+        field.item = describeType(
+          'item',
+          element,
+          checker,
+          true,
+          elText,
+          ctx,
+          depth + 1,
+        );
+        if (field.item.fields?.length) {
+          const shape = `{ ${field.item.fields.map((f) => `${f.name}: ${f.typeText}`).join('; ')} }`;
+          field.item.typeText = shape;
+          field.typeText = `${shape}[]`;
+        } else if (field.item.typeText) {
+          field.typeText = `${field.item.typeText}[]`;
+        }
       }
+    } catch (err) {
+      if (!isStackOverflow(err)) throw err;
     }
   }
 
@@ -426,11 +564,13 @@ function isReactNodeTypeText(typeText: string): boolean {
 
 function classifyType(type: Type, typeText: string): PropKind {
   const text = typeText.replace(/\s+/g, ' ');
-  const unwrapped = unwrapNullish(type);
-  const unwrappedText = unwrapped.getText(
-    undefined,
-    TypeFormatFlags.UseAliasDefinedOutsideCurrentScope,
-  ).replace(/\s+/g, ' ');
+  let unwrapped: Type;
+  try {
+    unwrapped = unwrapNullish(type);
+  } catch {
+    return 'unknown';
+  }
+  const unwrappedText = safeTypeText(unwrapped).replace(/\s+/g, ' ');
 
   if (isRnStyleTypeText(text) || isRnStyleTypeText(unwrappedText)) return 'object';
   if (isReactNodeTypeText(text) || isReactNodeTypeText(unwrappedText)) return 'reactNode';
@@ -446,12 +586,16 @@ function classifyType(type: Type, typeText: string): PropKind {
     return 'enum';
   }
 
-  if (
-    unwrapped.getCallSignatures().length > 0 ||
-    /\([^)]*\)\s*=>/.test(unwrappedText) ||
-    unwrappedText.startsWith('Function')
-  ) {
-    return 'function';
+  try {
+    if (
+      unwrapped.getCallSignatures().length > 0 ||
+      /\([^)]*\)\s*=>/.test(unwrappedText) ||
+      unwrappedText.startsWith('Function')
+    ) {
+      return 'function';
+    }
+  } catch {
+    // ignore
   }
 
   if (
@@ -467,23 +611,30 @@ function classifyType(type: Type, typeText: string): PropKind {
     const options = extractLiteralOptions(unwrapped);
     const nonNullish = unwrapped.getUnionTypes().filter((t) => !t.isNull() && !t.isUndefined());
     if (options.length > 0 && options.length === nonNullish.length) {
-      // true | false → boolean control, not an enum dropdown
       if (options.every((o) => typeof o === 'boolean') && options.includes(true) && options.includes(false)) {
         return 'boolean';
       }
       return 'enum';
     }
+    // One-level unwrap only — no recursive classifyType (stack-safe)
     const constructive = preferConstructiveUnionMember(unwrapped);
     if (constructive !== unwrapped) {
-      return classifyType(
-        constructive,
-        constructive.getText(undefined, TypeFormatFlags.UseAliasDefinedOutsideCurrentScope),
-      );
+      if (constructive.isArray() || safeTypeText(constructive).endsWith('[]')) return 'array';
+      if (
+        constructive.isObject() ||
+        constructive.isInterface() ||
+        constructive.isClass() ||
+        constructive.getAliasSymbol()
+      ) {
+        return 'object';
+      }
+      if (constructive.isString()) return 'string';
+      if (constructive.isNumber()) return 'number';
+      if (constructive.isBoolean()) return 'boolean';
     }
     return 'union';
   }
 
-  // Type aliases / interfaces / anonymous objects
   const alias = unwrapped.getAliasSymbol()?.getName();
   if (alias && alias !== '__type') {
     if (unwrapped.isArray() || unwrappedText.endsWith('[]')) return 'array';
@@ -629,9 +780,7 @@ function resolveTypeDisplayName(type: Type, rawText: string): string {
     }
   }
 
-  return simplifyTypeText(
-    type.getText(undefined, TypeFormatFlags.UseAliasDefinedOutsideCurrentScope) || rawText,
-  );
+  return simplifyTypeText(safeTypeText(type) || rawText);
 }
 
 function simplifyTypeText(text: string): string {
@@ -639,5 +788,5 @@ function simplifyTypeText(text: string): string {
     .replace(/import\(".*?"\)\./g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 120);
+    .slice(0, MAX_TYPE_TEXT_LEN);
 }

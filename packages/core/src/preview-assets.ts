@@ -56,6 +56,7 @@ export function shouldSkipCatalogFile(relativePath: string, projectType: Project
 
 /** Discover CSS files to inject into the preview iframe. */
 export function discoverPreviewStyles(root: string, projectType: ProjectType): string[] {
+  const resolvedRoot = path.resolve(root);
   const candidates = [
     'app/globals.css',
     'src/app/globals.css',
@@ -69,13 +70,13 @@ export function discoverPreviewStyles(root: string, projectType: ProjectType): s
 
   const found: string[] = [];
   for (const rel of candidates) {
-    const abs = path.join(root, rel);
+    const abs = path.join(resolvedRoot, rel);
     if (fs.existsSync(abs)) found.push(toFsUrl(abs));
   }
 
   // Pull CSS imports from root layout when present
   for (const layout of ['app/layout.tsx', 'app/layout.jsx', 'src/app/layout.tsx', 'src/app/layout.jsx']) {
-    const abs = path.join(root, layout);
+    const abs = path.join(resolvedRoot, layout);
     if (!fs.existsSync(abs)) continue;
     try {
       const src = fs.readFileSync(abs, 'utf8');
@@ -84,7 +85,7 @@ export function discoverPreviewStyles(root: string, projectType: ProjectType): s
       while ((m = re.exec(src))) {
         const spec = m[1];
         const resolved = spec.startsWith('@/')
-          ? path.join(root, spec.slice(2))
+          ? path.join(resolvedRoot, spec.slice(2))
           : path.resolve(path.dirname(abs), spec);
         if (fs.existsSync(resolved)) {
           const url = toFsUrl(resolved);
@@ -105,6 +106,6 @@ export function discoverPreviewStyles(root: string, projectType: ProjectType): s
 }
 
 function toFsUrl(absPath: string): string {
-  const normalized = absPath.split(path.sep).join('/');
+  const normalized = path.resolve(absPath).split(path.sep).join('/');
   return `/@fs${normalized.startsWith('/') ? '' : '/'}${normalized}`;
 }

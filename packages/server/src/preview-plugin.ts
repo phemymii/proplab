@@ -8,6 +8,7 @@ const VIRTUAL_PREFIX = '\0proplab-preview:';
 export function proplabPreviewPlugin(
   getComponent: (id: string) => ComponentInfo | undefined,
   getConfigPath?: () => string | null,
+  getStyleUrls?: () => string[],
 ): Plugin {
   return {
     name: 'proplab-preview',
@@ -47,11 +48,17 @@ export function proplabPreviewPlugin(
         ? `import * as PropLabConfigMod from ${JSON.stringify(configImportPath)};`
         : 'const PropLabConfigMod = null;';
 
+      // Import project CSS as Vite modules so Tailwind/PostCSS runs and styles inject
+      const styleImports = (getStyleUrls?.() ?? [])
+        .map((url) => `import ${JSON.stringify(url)};`)
+        .join('\n');
+
       return `
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import * as Mod from ${JSON.stringify(importPath)};
 ${configImport}
+${styleImports}
 
 const Component = ${exportExpr};
 const COMPONENT_NAME = ${JSON.stringify(comp.name)};
@@ -414,7 +421,11 @@ export function previewHtml(
 ): string {
   const encoded = encodeURIComponent(componentId);
   const styleTags = styleUrls
-    .map((url) => `<link rel="stylesheet" href="${url}" />`)
+    .map((url) => {
+      // Vite serves plain CSS only with ?direct — without it, /@fs/*.css is a JS module
+      const href = url.includes('?') ? url : `${url}?direct`;
+      return `<link rel="stylesheet" href="${href}" />`;
+    })
     .join('\n  ');
 
   const rnReset = options.reactNative

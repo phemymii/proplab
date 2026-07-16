@@ -88,6 +88,7 @@ export function discoverProject(root: string): ProjectConfig {
 export function listSourceFiles(root: string, include?: string[]): string[] {
   const results: string[] = [];
   const resolved = path.resolve(root);
+  const visited = new Set<string>();
 
   if (include?.length) {
     for (const rel of include) {
@@ -95,7 +96,7 @@ export function listSourceFiles(root: string, include?: string[]): string[] {
       if (!fs.existsSync(abs)) continue;
       const stat = fs.statSync(abs);
       if (stat.isDirectory()) {
-        walk(resolved, abs, results);
+        walk(resolved, abs, results, visited);
         continue;
       }
       if (stat.isFile() && isSourceFileName(path.basename(abs))) {
@@ -103,9 +104,8 @@ export function listSourceFiles(root: string, include?: string[]): string[] {
         // Co-located folder: Button.tsx → also scan Button/
         const siblingDir = abs.replace(/\.(tsx|jsx|ts|js)$/, '');
         if (siblingDir !== abs && fs.existsSync(siblingDir) && fs.statSync(siblingDir).isDirectory()) {
-          walk(resolved, siblingDir, results);
+          walk(resolved, siblingDir, results, visited);
         }
-        // Co-located index barrel next to a folder entry is already covered by dir walks
       }
     }
     return dedupe(results);
@@ -116,23 +116,28 @@ export function listSourceFiles(root: string, include?: string[]): string[] {
   );
 
   if (preferred.length === 0) {
-    walk(resolved, resolved, results);
+    walk(resolved, resolved, results, visited);
     return results;
   }
 
   for (const dir of preferred) {
     const base = path.basename(dir);
     if (base === 'packages' || base === 'apps') {
-      walkWorkspacePackages(resolved, dir, results);
+      walkWorkspacePackages(resolved, dir, results, visited);
     } else {
-      walk(resolved, dir, results);
+      walk(resolved, dir, results, visited);
     }
   }
 
   return dedupe(results);
 }
 
-function walkWorkspacePackages(root: string, workspaceDir: string, out: string[]): void {
+function walkWorkspacePackages(
+  root: string,
+  workspaceDir: string,
+  out: string[],
+  visited: Set<string>,
+): void {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(workspaceDir, { withFileTypes: true });
@@ -149,15 +154,29 @@ function walkWorkspacePackages(root: string, workspaceDir: string, out: string[]
       .filter((dir) => fs.existsSync(dir) && fs.statSync(dir).isDirectory());
 
     if (nested.length > 0) {
-      for (const dir of nested) walk(root, dir, out);
+      for (const dir of nested) walk(root, dir, out, visited);
     } else {
-      // Small packages with sources at the package root
-      walk(root, pkgRoot, out);
+      walk(root, pkgRoot, out, visited);
     }
   }
 }
 
-function walk(root: string, dir: string, out: string[]): void {
+function walk(root: string, dir: string, out: string[], visited = new Set<string>()): void {
+  // Windows junctions / symlinks can loop — track real paths
+  let real: string;
+  try {
+    real = fs.realpathSync(dir);
+  } catch {
+    real = path.resolve(dir);
+  }
+  const realKey = real.toLowerCase();
+  if (visited.has(realKey)) return;
+  visited.add(realKey);
+
+  // Cap depth to avoid pathological trees
+  const relDepth = path.relative(root, dir).split(path.sep).filter(Boolean).length;
+  if (relDepth > 24) return;
+
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -170,8 +189,22 @@ function walk(root: string, dir: string, out: string[]): void {
     if (IGNORE_DIRS.has(entry.name)) continue;
 
     const full = path.join(dir, entry.name);
+    // Skip symlink/junction cycles without following endlessly
+    if (entry.isSymbolicLink?.()) {
+      try {
+        const stat = fs.statSync(full);
+        if (stat.isDirectory()) {
+          walk(root, full, out, visited);
+          continue;
+        }
+        if (stat.isFile() && isSourceFileName(entry.name)) out.push(full);
+      } catch {
+        // dangling link
+      }
+      continue;
+    }
     if (entry.isDirectory()) {
-      walk(root, full, out);
+      walk(root, full, out, visited);
       continue;
     }
     if (!entry.isFile()) continue;

@@ -83,6 +83,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
     proplabPreviewPlugin(
       (id) => (catalog ? getComponentById(catalog, id) : undefined),
       () => findPropLabConfig(projectRoot)?.path ?? null,
+      () => styleUrls,
     ),
   ];
 

@@ -136,6 +136,15 @@ node packages/cli/dist/index.js --project examples/demo-ui
 npm run demo:hard
 ```
 
+### Tailwind + Next.js
+
+[`examples/tailwind-next`](examples/tailwind-next) — App Router + Tailwind (`TwButton`, `TwBadge`, `TwCard`, `TwAlert`):
+
+```bash
+cd examples/tailwind-next && npm install && cd ../..
+npm run demo:tailwind
+```
+
 ---
 
 ## Features (current)
