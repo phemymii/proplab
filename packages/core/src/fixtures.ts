@@ -133,10 +133,23 @@ function shouldIncludeOptional(field: PropField, componentName: string): boolean
     if (field.name === 'children' && VOID_COMPONENT_NAMES.has(componentName)) return false;
     return true;
   }
+  // Structured props (PageObject | null, items[], …) — always fixture so UI stays visible
+  if (field.kind === 'object' && (field.fields?.length || looksLikeStructuredType(field))) {
+    return true;
+  }
+  if (field.kind === 'array' && field.item) {
+    return true;
+  }
   if (field.name === 'children') {
     return !VOID_COMPONENT_NAMES.has(componentName);
   }
   return OPTIONAL_VISUAL_PROPS.has(field.name);
+}
+
+function looksLikeStructuredType(field: PropField): boolean {
+  const t = field.typeText ?? '';
+  const base = t.split('|')[0]?.trim() ?? '';
+  return /^[A-Z][A-Za-z0-9_]+$/.test(base) || t.startsWith('{');
 }
 
 function isUnsafeGeneratedProp(name: string): boolean {
@@ -175,7 +188,12 @@ function valueForField(field: PropField, componentName: string, depth: number): 
     case 'enum':
       return field.options?.[0] ?? 'default';
     case 'union':
-      return field.options?.[0] ?? null;
+      // Prefer constructive fixtures over null so nullable object props still render
+      if (field.options?.[0] !== undefined) return field.options[0];
+      if (field.fields?.length) {
+        return valueForField({ ...field, kind: 'object' }, componentName, depth);
+      }
+      return stringFor(field.name, componentName);
     case 'reactNode':
       if (field.name === 'children') return `${componentName} content`;
       if (field.name === 'icon') return '★';
@@ -185,6 +203,14 @@ function valueForField(field: PropField, componentName: string, depth: number): 
       return `${field.name} content`;
     case 'array':
       if (field.item) {
+        // Breadcrumb-style { href, title }[] gets sensible trail items
+        if (isHrefTitleItem(field.item)) {
+          return [
+            { href: '/', title: 'Home' },
+            { href: '/products', title: 'Products' },
+            { href: '/products/demo', title: componentName },
+          ];
+        }
         return [
           valueForField({ ...field.item, name: `${field.name}0` }, componentName, depth + 1),
           valueForField({ ...field.item, name: `${field.name}1` }, componentName, depth + 1),
@@ -192,30 +218,61 @@ function valueForField(field: PropField, componentName: string, depth: number): 
       }
       return [];
     case 'object':
-      if (depth > 2) return {};
+      if (depth > 4) return {};
       if (field.fields?.length) {
         const obj: Record<string, unknown> = {};
         for (const nested of field.fields) {
           if (nested.kind === 'function') continue;
+          // Nested fields are always filled — even optional ones — so PathObjectType is complete
           obj[nested.name] = valueForField(nested, componentName, depth + 1);
         }
         return obj;
       }
-      return {};
+      // Named object type without expanded fields — still avoid null
+      return objectStubFor(field.name, componentName);
     case 'function':
       return undefined;
     default:
-      return null;
+      if (looksLikeStructuredType(field)) return objectStubFor(field.name, componentName);
+      return stringFor(field.name, componentName);
   }
+}
+
+function isHrefTitleItem(item: PropField): boolean {
+  const names = new Set(item.fields?.map((f) => f.name) ?? []);
+  return names.has('href') && names.has('title');
+}
+
+function objectStubFor(name: string, componentName: string): Record<string, unknown> {
+  const lower = name.toLowerCase();
+  if (lower.includes('path') || lower.includes('breadcrumb')) {
+    return {
+      path: '/products/demo',
+      breadcrumb: [
+        { href: '/', title: 'Home' },
+        { href: '/products', title: 'Products' },
+        { href: '/products/demo', title: componentName },
+      ],
+    };
+  }
+  if (lower.includes('user') || lower.includes('author')) {
+    return { id: 'usr_demo', name: 'Ada Lovelace', email: 'ada@example.com' };
+  }
+  if (lower.includes('item') || lower.includes('product')) {
+    return { id: 'item_1', title: componentName, href: '/example' };
+  }
+  return { id: 'example-id', label: componentName };
 }
 
 function stringFor(name: string, componentName: string): string {
   const lower = name.toLowerCase();
   if (lower.includes('email')) return 'user@example.com';
-  if (lower.includes('url') || lower.includes('href') || lower === 'src' || lower.includes('avatar')) {
+  if (lower.includes('url') || lower === 'src' || lower.includes('avatar')) {
     return 'https://example.com';
   }
+  if (lower.includes('href') || lower === 'to' || lower === 'pathname') return '/example';
   if (lower.includes('color')) return '#3d4f5f';
+  if (lower === 'path') return '/products/demo';
   if (lower.includes('path') || lower.includes('to')) return '/example';
   if (lower === 'id' || lower.endsWith('id')) return 'example-id';
   if (lower.includes('placeholder')) return 'Enter text…';

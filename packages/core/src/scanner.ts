@@ -57,18 +57,9 @@ export async function scanProject(
     total: files.length,
   });
 
-  const project = new Project({
-    skipAddingFilesFromTsConfig: true,
-    compilerOptions: {
-      allowJs: true,
-      jsx: 4,
-      target: 99,
-      module: 99,
-      esModuleInterop: true,
-      strict: false,
-      skipLibCheck: true,
-    },
-  });
+  // Prefer the project's tsconfig so `@/` and other path aliases resolve —
+  // otherwise imported types like PageObject collapse to any/unknown.
+  const project = createScanProject(config.root, config.aliases);
 
   const components: ComponentInfo[] = [];
   let parsed = 0;
@@ -333,6 +324,51 @@ export function normalizeComponentId(id: string): string {
 
 function toPosixPath(p: string): string {
   return p.replace(/\\/g, '/');
+}
+
+function createScanProject(root: string, aliases: Record<string, string>): Project {
+  const tsconfig = findTsConfig(root);
+  if (tsconfig) {
+    try {
+      return new Project({
+        tsConfigFilePath: tsconfig,
+        skipAddingFilesFromTsConfig: true,
+      });
+    } catch {
+      // fall through to manual options
+    }
+  }
+
+  const paths: Record<string, string[]> = {};
+  for (const [key, abs] of Object.entries(aliases)) {
+    const rel = toPosixPath(path.relative(root, abs)) || '.';
+    paths[`${key}/*`] = [`${rel}/*`];
+    paths[key] = [rel];
+  }
+
+  return new Project({
+    skipAddingFilesFromTsConfig: true,
+    compilerOptions: {
+      allowJs: true,
+      jsx: 4,
+      target: 99,
+      module: 99,
+      moduleResolution: 100, // bundler
+      esModuleInterop: true,
+      strict: false,
+      skipLibCheck: true,
+      baseUrl: root,
+      paths,
+    },
+  });
+}
+
+function findTsConfig(root: string): string | undefined {
+  for (const name of ['tsconfig.json', 'jsconfig.json', 'tsconfig.app.json', 'tsconfig.base.json']) {
+    const candidate = path.join(root, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 export function searchComponents(catalog: LabCatalog, query: string): ComponentInfo[] {

@@ -207,11 +207,11 @@ function typeToFields(
   seen: Set<string>,
   depth: number,
 ): PropField[] {
-  if (depth > 4) return [];
+  if (depth > 6) return [];
 
-  // Unwrap Promise / Readonly etc lightly
-  const apparent = type.getApparentType();
-  const target = apparent.isUnion() ? flattenUnion(apparent) : apparent;
+  // Unwrap nullish unions + Promise / Readonly lightly so PageObject | null expands
+  const apparent = unwrapNullish(type.getApparentType());
+  const target = apparent.isUnion() ? preferConstructiveUnionMember(apparent) : apparent;
 
   if (target.isIntersection()) {
     const fields: PropField[] = [];
@@ -311,12 +311,18 @@ function describeType(
   seen: Set<string>,
   depth: number,
 ): PropField {
-  let kind = classifyType(type, typeText);
+  const unwrapped = unwrapNullish(type);
+  const unwrappedText = unwrapped.getText(
+    undefined,
+    TypeFormatFlags.UseAliasDefinedOutsideCurrentScope,
+  );
+  let kind = classifyType(unwrapped, unwrappedText);
+
   // RN StyleProp<ViewStyle> etc. often resolve as opaque unions → "unknown";
   // never treat those as free-form strings (crashes react-native-web).
-  if (isRnStyleTypeText(typeText)) {
+  if (isRnStyleTypeText(typeText) || isRnStyleTypeText(unwrappedText)) {
     kind = 'object';
-  } else if (isReactNodeTypeText(typeText)) {
+  } else if (isReactNodeTypeText(typeText) || isReactNodeTypeText(unwrappedText)) {
     kind = 'reactNode';
   } else if ((kind === 'unknown' || kind === 'union') && /Style$/.test(name)) {
     kind = 'object';
@@ -328,33 +334,54 @@ function describeType(
   ) {
     kind = 'reactNode';
   }
+
+  // Imported aliases (PathObjectType) that failed to classify — try expanding properties
+  if (kind === 'unknown' || kind === 'union') {
+    const nested = typeToFields(unwrapped, checker, seen, depth + 1);
+    if (nested.length > 0) {
+      kind = 'object';
+    } else if (looksLikeTypeAliasName(unwrappedText) || looksLikeTypeAliasName(typeText)) {
+      kind = 'object';
+    }
+  }
+
+  const display = formatTypeText(type, unwrapped, typeText);
   const field: PropField = {
     name,
     kind,
     required,
-    typeText: simplifyTypeText(typeText),
+    typeText: kind === 'boolean' ? 'boolean' : display,
   };
 
   if (kind === 'enum' || kind === 'union') {
     const options = extractLiteralOptions(type);
     if (options.length > 0) {
-      field.options = options;
-      field.kind = 'enum';
+      if (options.every((o) => typeof o === 'boolean') && options.includes(true) && options.includes(false)) {
+        field.kind = 'boolean';
+        field.typeText = 'boolean';
+      } else {
+        field.options = options;
+        field.kind = 'enum';
+        field.typeText = simplifyTypeText(options.map((o) => JSON.stringify(o)).join(' | '));
+      }
     }
   }
 
-  if (kind === 'object') {
+  if (field.kind === 'object') {
     // Don't expand RN style bags (ViewStyle has 100+ keys) — JSON editor is enough
-    if (!isRnStyleTypeText(typeText)) {
-      field.fields = typeToFields(type, checker, seen, depth + 1);
+    if (!isRnStyleTypeText(typeText) && !isRnStyleTypeText(unwrappedText)) {
+      field.fields = typeToFields(unwrapped, checker, seen, depth + 1);
     }
   }
 
-  if (kind === 'array') {
-    const args = type.getTypeArguments();
-    const element = type.getArrayElementType?.() ?? args[0];
+  if (field.kind === 'array') {
+    const args = unwrapped.getTypeArguments();
+    const element = unwrapped.getArrayElementType?.() ?? args[0];
     if (element) {
-      const elText = element.getText();
+      const elText = element.getText(
+        undefined,
+        TypeFormatFlags.UseAliasDefinedOutsideCurrentScope,
+      );
       field.item = describeType(
         'item',
         element,
@@ -364,6 +391,13 @@ function describeType(
         seen,
         depth + 1,
       );
+      if (field.item.fields?.length) {
+        const shape = `{ ${field.item.fields.map((f) => `${f.name}: ${f.typeText}`).join('; ')} }`;
+        field.item.typeText = shape;
+        field.typeText = `${shape}[]`;
+      } else if (field.item.typeText) {
+        field.typeText = `${field.item.typeText}[]`;
+      }
     }
   }
 
@@ -392,37 +426,81 @@ function isReactNodeTypeText(typeText: string): boolean {
 
 function classifyType(type: Type, typeText: string): PropKind {
   const text = typeText.replace(/\s+/g, ' ');
+  const unwrapped = unwrapNullish(type);
+  const unwrappedText = unwrapped.getText(
+    undefined,
+    TypeFormatFlags.UseAliasDefinedOutsideCurrentScope,
+  ).replace(/\s+/g, ' ');
 
-  if (isRnStyleTypeText(text)) return 'object';
-  if (isReactNodeTypeText(text)) return 'reactNode';
+  if (isRnStyleTypeText(text) || isRnStyleTypeText(unwrappedText)) return 'object';
+  if (isReactNodeTypeText(text) || isReactNodeTypeText(unwrappedText)) return 'reactNode';
 
-  if (type.isString() || text === 'string') return 'string';
-  if (type.isNumber() || text === 'number') return 'number';
-  if (type.isBoolean() || text === 'boolean') return 'boolean';
-  if (type.isStringLiteral() || type.isNumberLiteral() || type.isBooleanLiteral()) return 'enum';
+  if (unwrapped.isString() || unwrappedText === 'string' || text === 'string') return 'string';
+  if (unwrapped.isNumber() || unwrappedText === 'number' || text === 'number') return 'number';
+  if (unwrapped.isBoolean() || unwrappedText === 'boolean' || text === 'boolean') return 'boolean';
+  if (
+    unwrapped.isStringLiteral() ||
+    unwrapped.isNumberLiteral() ||
+    unwrapped.isBooleanLiteral()
+  ) {
+    return 'enum';
+  }
 
-  if (type.getCallSignatures().length > 0 || /\([^)]*\)\s*=>/.test(text) || text.startsWith('Function')) {
+  if (
+    unwrapped.getCallSignatures().length > 0 ||
+    /\([^)]*\)\s*=>/.test(unwrappedText) ||
+    unwrappedText.startsWith('Function')
+  ) {
     return 'function';
   }
 
-  if (type.isArray() || text.endsWith('[]') || /^Array</.test(text) || /^ReadonlyArray</.test(text)) {
+  if (
+    unwrapped.isArray() ||
+    unwrappedText.endsWith('[]') ||
+    /^Array</.test(unwrappedText) ||
+    /^ReadonlyArray</.test(unwrappedText)
+  ) {
     return 'array';
   }
 
-  if (type.isUnion()) {
-    const options = extractLiteralOptions(type);
-    if (options.length > 0) return 'enum';
-    // string | undefined etc.
-    const nonNull = type.getUnionTypes().filter((t) => !t.isUndefined() && !t.isNull());
-    if (nonNull.length === 1) return classifyType(nonNull[0], nonNull[0].getText());
+  if (unwrapped.isUnion()) {
+    const options = extractLiteralOptions(unwrapped);
+    const nonNullish = unwrapped.getUnionTypes().filter((t) => !t.isNull() && !t.isUndefined());
+    if (options.length > 0 && options.length === nonNullish.length) {
+      // true | false → boolean control, not an enum dropdown
+      if (options.every((o) => typeof o === 'boolean') && options.includes(true) && options.includes(false)) {
+        return 'boolean';
+      }
+      return 'enum';
+    }
+    const constructive = preferConstructiveUnionMember(unwrapped);
+    if (constructive !== unwrapped) {
+      return classifyType(
+        constructive,
+        constructive.getText(undefined, TypeFormatFlags.UseAliasDefinedOutsideCurrentScope),
+      );
+    }
     return 'union';
   }
 
-  if (type.isObject() || type.isInterface() || type.isClass() || text.startsWith('{')) {
+  // Type aliases / interfaces / anonymous objects
+  const alias = unwrapped.getAliasSymbol()?.getName();
+  if (alias && alias !== '__type') {
+    if (unwrapped.isArray() || unwrappedText.endsWith('[]')) return 'array';
     return 'object';
   }
 
-  if (type.isLiteral()) return 'enum';
+  if (
+    unwrapped.isObject() ||
+    unwrapped.isInterface() ||
+    unwrapped.isClass() ||
+    unwrappedText.startsWith('{') ||
+    looksLikeTypeAliasName(unwrappedText)
+  ) {
+    return 'object';
+  }
+
+  if (unwrapped.isLiteral()) return 'enum';
 
   return 'unknown';
 }
@@ -455,16 +533,110 @@ function extractLiteralOptions(type: Type): Array<string | number | boolean> {
   return options;
 }
 
-function flattenUnion(type: Type): Type {
-  // Prefer non-undefined branch for property walking when it's T | undefined
+/** Strip null | undefined so PathObjectType | null → PathObjectType. */
+function unwrapNullish(type: Type): Type {
+  if (!type.isUnion()) return type;
   const parts = type.getUnionTypes().filter((t) => !t.isUndefined() && !t.isNull());
+  if (parts.length === 0) return type;
   if (parts.length === 1) return parts[0];
-  return type;
+  // Keep pure literal unions ("PLP" | "PDP") intact for enum controls
+  if (parts.every((t) => t.isStringLiteral() || t.isNumberLiteral() || t.isBooleanLiteral())) {
+    return type;
+  }
+  return preferConstructiveUnionMember(type);
+}
+
+/**
+ * When a union has several members, prefer object / array / interface over
+ * primitives so fixtures stay structured (and the component stays visible).
+ */
+function preferConstructiveUnionMember(type: Type): Type {
+  if (!type.isUnion()) return type;
+  const parts = type.getUnionTypes().filter((t) => !t.isUndefined() && !t.isNull());
+  if (parts.length === 0) return type;
+  if (parts.length === 1) return parts[0];
+  if (parts.every((t) => t.isStringLiteral() || t.isNumberLiteral() || t.isBooleanLiteral())) {
+    return type;
+  }
+
+  const score = (t: Type): number => {
+    if (t.isArray() || t.getArrayElementType()) return 5;
+    if (t.isInterface() || t.isClass()) return 4;
+    const alias = t.getAliasSymbol()?.getName();
+    if (alias && alias !== '__type') return 4;
+    if (t.isObject() && t.getProperties().length > 0) return 3;
+    if (t.isString() || t.isNumber() || t.isBoolean()) return 1;
+    return 2;
+  };
+
+  let best = parts[0];
+  let bestScore = score(best);
+  for (let i = 1; i < parts.length; i++) {
+    const s = score(parts[i]);
+    if (s > bestScore) {
+      best = parts[i];
+      bestScore = s;
+    }
+  }
+  return best;
+}
+
+function looksLikeTypeAliasName(text: string): boolean {
+  const cleaned = simplifyTypeText(text).split('|')[0]?.trim() ?? '';
+  return /^[A-Z][A-Za-z0-9_]+$/.test(cleaned);
+}
+
+function formatTypeText(original: Type, unwrapped: Type, rawText: string): string {
+  const literalOpts = extractLiteralOptions(unwrapNullish(original));
+  if (
+    literalOpts.length > 0 &&
+    !(literalOpts.every((o) => typeof o === 'boolean') && literalOpts.includes(true) && literalOpts.includes(false))
+  ) {
+    return simplifyTypeText(literalOpts.map((o) => JSON.stringify(o)).join(' | '));
+  }
+
+  const base = resolveTypeDisplayName(unwrapped, rawText);
+
+  const hadNullish =
+    original.isUnion() &&
+    original.getUnionTypes().some((t) => t.isNull() || t.isUndefined());
+  if (hadNullish) {
+    const nullish = original.getUnionTypes().some((t) => t.isNull()) ? 'null' : 'undefined';
+    return simplifyTypeText(`${base} | ${nullish}`);
+  }
+  return simplifyTypeText(base);
+}
+
+function resolveTypeDisplayName(type: Type, rawText: string): string {
+  const alias = type.getAliasSymbol()?.getName();
+  if (alias && alias !== '__type' && alias !== 'default' && !alias.startsWith('__')) {
+    return alias;
+  }
+
+  const sym = type.getSymbol();
+  const symName = sym?.getName();
+  if (symName && symName !== '__type' && symName !== 'default' && !symName.startsWith('__')) {
+    return symName;
+  }
+
+  // default-exported interface → name from declaration, else filename
+  for (const decl of sym?.getDeclarations() ?? []) {
+    if (Node.isInterfaceDeclaration(decl) || Node.isTypeAliasDeclaration(decl)) {
+      const n = decl.getName();
+      if (n && n !== 'default') return n;
+      const file = decl.getSourceFile().getBaseName().replace(/\.(tsx?|jsx?|d\.ts)$/, '');
+      if (file && /^[A-Z]/.test(file)) return file;
+    }
+  }
+
+  return simplifyTypeText(
+    type.getText(undefined, TypeFormatFlags.UseAliasDefinedOutsideCurrentScope) || rawText,
+  );
 }
 
 function simplifyTypeText(text: string): string {
   return text
-    .replace(/import\(".*?\"\)\./g, '')
+    .replace(/import\(".*?"\)\./g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 120);

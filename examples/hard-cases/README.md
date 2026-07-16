@@ -12,6 +12,7 @@ React context and throw without providers. This kit demonstrates project-level
 | `ThemedBanner` | `ThemeProvider` | `useTheme must be used within ThemeProvider` |
 | `ProfileFormField` | `FormProvider` | `useFormContext must be used within FormProvider` |
 | `SlotCard` | none | — (`icon` / `children` / `badge` / `footer` are `ReactNode` slots) |
+| `Breadcrumb` | none | — imported `PageObject \| null` must fixture a real object (not `null`) |
 
 Dummy props (`showEmail`, `title`, `name`, …) are fine. The crash is missing
 **app shell**, not missing fixtures.
@@ -53,8 +54,9 @@ Or:
 npx proplab --project examples/hard-cases
 ```
 
-Open `AccountBadge`, `ThemedBanner`, `ProfileFormField`, or `SlotCard` — the
-first three should render with auth / theme / form wired in. `SlotCard` shows
-`ReactNode` slots (`icon`, `children`, `badge`, `footer`) editable as text in
-the props panel. Remove or rename `.proplabrc.tsx` to see the context errors
-again on the provider-backed components.
+Open `AccountBadge`, `ThemedBanner`, `ProfileFormField`, `SlotCard`, or
+`Breadcrumb` — the first three should render with auth / theme / form wired in.
+`SlotCard` shows `ReactNode` slots; `Breadcrumb` shows an imported
+`PageObject | null` prop that should get a real object fixture (not `null`).
+Remove or rename `.proplabrc.tsx` to see the context errors again on the
+provider-backed components.

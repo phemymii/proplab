@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import type { PropField } from '@proplab/core';
-import { RotateCcw } from 'lucide-react';
-import { useExplorerStore } from '../store/explorer';
+import { useEffect, useState } from "react";
+import type { PropField } from "@proplab/core";
+import { RotateCcw } from "lucide-react";
+import { useExplorerStore } from "../store/explorer";
 
 export function PropsPanel() {
   const component = useExplorerStore((s) => s.selectedComponent());
@@ -42,7 +42,7 @@ export function PropsPanel() {
           className="props-btn"
           onClick={() => {
             setPropsDraft({ ...component.fixtures });
-            setVariantId('default');
+            setVariantId("default");
           }}
         >
           <RotateCcw size={12} />
@@ -53,7 +53,9 @@ export function PropsPanel() {
       <div className="props-section props-section--grow">
         <div className="props-label">
           Props
-          <span className="props-label-count">{component.props.fields.length}</span>
+          <span className="props-label-count">
+            {component.props.fields.length}
+          </span>
         </div>
 
         {component.props.fields.length === 0 ? (
@@ -101,7 +103,7 @@ function PropControl({
     </div>
   );
 
-  if (field.kind === 'boolean') {
+  if (field.kind === "boolean") {
     return (
       <div>
         {label}
@@ -114,13 +116,15 @@ function PropControl({
           <span className="prop-toggle-track">
             <span className="prop-toggle-thumb" />
           </span>
-          <span className="prop-toggle-value">{Boolean(value) ? 'true' : 'false'}</span>
+          <span className="prop-toggle-value">
+            {Boolean(value) ? "true" : "false"}
+          </span>
         </label>
       </div>
     );
   }
 
-  if (field.kind === 'enum' && field.options?.length) {
+  if (field.kind === "enum" && field.options?.length) {
     return (
       <div>
         {label}
@@ -143,21 +147,21 @@ function PropControl({
     );
   }
 
-  if (field.kind === 'number') {
+  if (field.kind === "number") {
     return (
       <div>
         {label}
         <input
           className="props-input"
           type="number"
-          value={typeof value === 'number' ? value : Number(value) || 0}
+          value={typeof value === "number" ? value : Number(value) || 0}
           onChange={(e) => onChange(e.target.valueAsNumber)}
         />
       </div>
     );
   }
 
-  if (field.kind === 'function') {
+  if (field.kind === "function") {
     return (
       <div>
         {label}
@@ -167,38 +171,52 @@ function PropControl({
   }
 
   // ReactNode / slots — text fixtures (strings are valid nodes on web)
-  if (field.kind === 'reactNode') {
+  if (field.kind === "reactNode") {
     return (
       <div>
         {label}
         <TextPropEditor
-          value={typeof value === 'string' ? value : value == null ? '' : String(value)}
+          value={
+            typeof value === "string"
+              ? value
+              : value == null
+                ? ""
+                : String(value)
+          }
           onChange={onChange}
-          rows={field.name === 'children' ? 3 : 2}
+          rows={field.name === "children" ? 3 : 2}
         />
         <div className="prop-type-hint">
-          {field.typeText ? `${field.typeText} · ` : ''}
-          plain text or HTML (e.g. {'<div>Hey</div>'})
+          {field.typeText ? `${field.typeText} · ` : ""}
+          plain text or HTML (e.g. {"<div>Hey</div>"})
         </div>
       </div>
     );
   }
 
-  // Objects, arrays, and RN StyleProp / unresolved style bags — JSON, never free text
+  // Objects, arrays, structured aliases (PageObject), style bags — JSON editor
   if (
-    field.kind === 'object' ||
-    field.kind === 'array' ||
-    isStyleLikeField(field)
+    field.kind === "object" ||
+    field.kind === "array" ||
+    isStyleLikeField(field) ||
+    isStructuredField(field)
   ) {
+    const fallback = isStyleLikeField(field)
+      ? EMPTY_STYLE
+      : field.kind === "array"
+        ? EMPTY_ARRAY
+        : EMPTY_OBJECT;
     return (
       <div>
         {label}
         <JsonPropEditor
           value={value}
-          emptyFallback={isStyleLikeField(field) ? EMPTY_STYLE : null}
+          emptyFallback={fallback}
           onChange={onChange}
         />
-        {field.typeText && <div className="prop-type-hint">{field.typeText}</div>}
+        {field.typeText && (
+          <div className="prop-type-hint">{field.typeText}</div>
+        )}
       </div>
     );
   }
@@ -209,7 +227,7 @@ function PropControl({
       <input
         className="props-input"
         type="text"
-        value={value == null ? '' : String(value)}
+        value={value == null ? "" : String(value)}
         onChange={(e) => onChange(e.target.value)}
       />
       {field.typeText && <div className="prop-type-hint">{field.typeText}</div>}
@@ -218,11 +236,27 @@ function PropControl({
 }
 
 const EMPTY_STYLE: Record<string, never> = Object.freeze({});
+const EMPTY_OBJECT: Record<string, never> = Object.freeze({});
+const EMPTY_ARRAY: readonly unknown[] = Object.freeze([]);
 
 function isStyleLikeField(field: PropField): boolean {
-  const t = field.typeText ?? '';
-  if (/\bStyleProp\b|(?:View|Text|Image)Style\b|RegisteredStyle\b/.test(t)) return true;
-  if (/Style$/.test(field.name) && field.kind === 'unknown') return true;
+  const t = field.typeText ?? "";
+  if (/\bStyleProp\b|(?:View|Text|Image)Style\b|RegisteredStyle\b/.test(t))
+    return true;
+  if (/Style$/.test(field.name) && field.kind === "unknown") return true;
+  return false;
+}
+
+/** PathObjectType | null, anonymous objects, etc. — never a free-text string input. */
+function isStructuredField(field: PropField): boolean {
+  if (field.fields?.length) return true;
+  if (field.item) return true;
+  if (field.kind !== "unknown" && field.kind !== "union") return false;
+  const t = field.typeText ?? "";
+  const base = t.split("|")[0]?.trim() ?? "";
+  if (t.startsWith("{")) return true;
+  if (/^[A-Z][A-Za-z0-9_]+$/.test(base)) return true;
+  if (typeof field === "object" && t.includes("[]")) return true;
   return false;
 }
 
@@ -284,7 +318,7 @@ function JsonPropEditor({
   return (
     <>
       <textarea
-        className={`props-textarea${invalid ? ' props-textarea--invalid' : ''}`}
+        className={`props-textarea${invalid ? " props-textarea--invalid" : ""}`}
         value={text}
         onChange={(e) => {
           const next = e.target.value;
@@ -307,7 +341,11 @@ function JsonPropEditor({
         rows={4}
         spellCheck={false}
       />
-      {invalid && <div className="prop-type-hint">Invalid JSON — finish editing to apply</div>}
+      {invalid && (
+        <div className="prop-type-hint">
+          Invalid JSON — finish editing to apply
+        </div>
+      )}
     </>
   );
 }
