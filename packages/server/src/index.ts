@@ -26,6 +26,7 @@ import { nextShimsPlugin, serverActionStubPlugin } from './next-shims.js';
 import { reactNativeWebPlugin } from './rn-web.js';
 import { assertProjectDependencies, buildPreviewViteConfig } from './vite-preview.js';
 import { openProjectFile } from './open-editor.js';
+import { blockSecretsPlugin } from './block-secrets.js';
 
 export interface ServerOptions {
   projectRoot: string;
@@ -79,6 +80,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   let propLabConfig = findPropLabConfig(projectRoot);
 
   const plugins: PluginOption[] = [
+    blockSecretsPlugin(),
     react(),
     proplabPreviewPlugin(
       (id) => (catalog ? getComponentById(catalog, id) : undefined),

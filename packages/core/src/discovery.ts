@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { findPropLabConfig } from './config.js';
+import { isSecretPath } from './secrets.js';
 import type { ProjectConfig, ProjectType } from './types.js';
 
 const IGNORE_DIRS = new Set([
@@ -39,6 +40,12 @@ const IGNORE_DIRS = new Set([
   'tmp',
   'temp',
   '.pnpm-store',
+  '.ssh',
+  '.aws',
+  '.gnupg',
+  '.kube',
+  '.azure',
+  '.gcloud',
 ]);
 
 /** Prefer these folders when present so large repos aren't fully walked. */
@@ -99,7 +106,7 @@ export function listSourceFiles(root: string, include?: string[]): string[] {
         walk(resolved, abs, results, visited);
         continue;
       }
-      if (stat.isFile() && isSourceFileName(path.basename(abs))) {
+      if (stat.isFile() && isSourceFileName(path.basename(abs)) && !isSecretPath(abs)) {
         results.push(abs);
         // Co-located folder: Button.tsx → also scan Button/
         const siblingDir = abs.replace(/\.(tsx|jsx|ts|js)$/, '');
@@ -197,7 +204,7 @@ function walk(root: string, dir: string, out: string[], visited = new Set<string
           walk(root, full, out, visited);
           continue;
         }
-        if (stat.isFile() && isSourceFileName(entry.name)) out.push(full);
+        if (stat.isFile() && isSourceFileName(entry.name) && !isSecretPath(full)) out.push(full);
       } catch {
         // dangling link
       }
@@ -209,6 +216,7 @@ function walk(root: string, dir: string, out: string[], visited = new Set<string
     }
     if (!entry.isFile()) continue;
     if (!isSourceFileName(entry.name)) continue;
+    if (isSecretPath(full)) continue;
     out.push(full);
   }
 }

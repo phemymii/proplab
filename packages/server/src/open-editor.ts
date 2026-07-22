@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import open from 'open';
+import { isSecretPath } from '@proplab/core';
 
 const execFileAsync = promisify(execFile);
 
@@ -27,6 +28,10 @@ export async function openProjectFile(options: {
 
   if (!isPathInsideRoot(resolved, root)) {
     return { ok: false, error: 'Path is outside the project root' };
+  }
+
+  if (isSecretPath(resolved)) {
+    return { ok: false, error: 'Refusing to open secret or credential file' };
   }
 
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {

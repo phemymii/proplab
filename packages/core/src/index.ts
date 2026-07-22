@@ -19,3 +19,4 @@ export { extractPropSchema } from './props.js';
 export { generateFixtures, generateVariants } from './fixtures.js';
 export { scanProject, getComponentById, normalizeComponentId, searchComponents, mightContainComponents } from './scanner.js';
 export { shouldSkipCatalogFile, discoverPreviewStyles } from './preview-assets.js';
+export { isSecretPath, rejectSecretPaths } from './secrets.js';

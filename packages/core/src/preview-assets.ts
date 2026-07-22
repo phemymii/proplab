@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { isSecretPath } from './secrets.js';
 import type { ProjectType } from './types.js';
 
 const ROUTE_FILE_RE =
@@ -15,6 +16,7 @@ const PROPLAB_CONFIG_RE =
 export function shouldSkipCatalogFile(relativePath: string, projectType: ProjectType): boolean {
   const norm = relativePath.replace(/\\/g, '/');
 
+  if (isSecretPath(norm)) return true;
   if (FRAMEWORK_ONLY_RE.test(norm)) return true;
   if (PROPLAB_CONFIG_RE.test(norm)) return true;
 
@@ -71,6 +73,7 @@ export function discoverPreviewStyles(root: string, projectType: ProjectType): s
   const found: string[] = [];
   for (const rel of candidates) {
     const abs = path.join(resolvedRoot, rel);
+    if (isSecretPath(abs)) continue;
     if (fs.existsSync(abs)) found.push(toFsUrl(abs));
   }
 
@@ -87,7 +90,7 @@ export function discoverPreviewStyles(root: string, projectType: ProjectType): s
         const resolved = spec.startsWith('@/')
           ? path.join(resolvedRoot, spec.slice(2))
           : path.resolve(path.dirname(abs), spec);
-        if (fs.existsSync(resolved)) {
+        if (fs.existsSync(resolved) && !isSecretPath(resolved)) {
           const url = toFsUrl(resolved);
           if (!found.includes(url)) found.push(url);
         }

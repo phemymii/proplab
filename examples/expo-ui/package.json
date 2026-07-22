@@ -5,14 +5,14 @@
   "type": "module",
   "description": "Expo/RN-style components for PropLab web preview (react-native-web)",
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-native-web": "^0.19.13"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-native-web": "^0.21.2"
   },
   "devDependencies": {
-    "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@types/react-native": "^0.73.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.9.3"
   }
 }

@@ -55,18 +55,22 @@ export function reactNativeWebPlugin(config: ProjectConfig): Plugin | null {
         },
         optimizeDeps: {
           include: ['react-native-web'],
-          esbuildOptions: {
-            resolveExtensions: [
-              '.web.js',
-              '.web.ts',
-              '.web.tsx',
-              '.js',
-              '.jsx',
-              '.ts',
-              '.tsx',
-            ],
-            loader: { '.js': 'jsx' },
-            mainFields: ['browser', 'module', 'main'],
+          rolldownOptions: {
+            resolve: {
+              extensions: [
+                '.web.js',
+                '.web.ts',
+                '.web.tsx',
+                '.js',
+                '.jsx',
+                '.ts',
+                '.tsx',
+              ],
+              mainFields: ['browser', 'module', 'main'],
+            },
+            moduleTypes: {
+              '.js': 'jsx',
+            },
           },
         },
       };

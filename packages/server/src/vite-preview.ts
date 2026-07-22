@@ -125,6 +125,7 @@ export function buildPreviewViteConfig(options: PreviewViteOptions): InlineConfi
     },
     resolve: {
       alias,
+      dedupe: ['react', 'react-dom'],
       preserveSymlinks: true,
     },
     define: {

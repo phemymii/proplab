@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { scanProject, type ScanProgress } from '@proplab/core';
+import { scanProject, isSecretPath, type ScanProgress } from '@proplab/core';
 import { startServer } from '@proplab/server';
 
 const program = new Command();
@@ -119,7 +119,21 @@ function normalizeInclude(value: unknown): string[] | undefined {
     .flatMap((item) => String(item).split(','))
     .map((s) => s.trim())
     .filter(Boolean);
-  return paths.length ? paths : undefined;
+
+  const allowed: string[] = [];
+  const blocked: string[] = [];
+  for (const p of paths) {
+    if (isSecretPath(p)) blocked.push(p);
+    else allowed.push(p);
+  }
+  if (blocked.length) {
+    console.warn(
+      chalk.yellow(
+        `  Skipping secret path(s): ${blocked.join(', ')}`,
+      ),
+    );
+  }
+  return allowed.length ? allowed : undefined;
 }
 
 program.parse();
