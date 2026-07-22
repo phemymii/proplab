@@ -1,7 +1,7 @@
 {
   "name": "proplab-tailwind-next",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Next.js App Router + Tailwind kit for PropLab CSS/PostCSS preview",
   "scripts": {
     "proplab": "echo 'Run from PropLab root: npm run demo:tailwind'"

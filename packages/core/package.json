@@ -1,6 +1,6 @@
 {
   "name": "@proplab/core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Component discovery, prop extraction, and fixture generation for PropLab",
   "type": "module",
   "main": "./dist/index.js",
