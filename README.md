@@ -294,6 +294,8 @@ Issues and PRs are welcome — especially reproductions against real apps (Next,
 
 ---
 
+🚀 **Check out another project:** [Vexelloom Studio](https://vexelloom.com) — Free, private in-browser Image, Video & PDF toolkit with zero cloud uploads.
+
 ## License
 
 MIT
